@@ -2,7 +2,7 @@ import express from 'express';
 import db from '../db/schema.js';
 import { getSessionUser } from './auth.js';
 import { checkRateLimit } from '../utils/moderation.js';
-import { sendTelegramContactNotification } from '../utils/telegram.js';
+import { sendTelegramContactNotification, retryPendingTelegramMessages } from '../utils/telegram.js';
 
 const router = express.Router();
 
@@ -57,7 +57,7 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'You have already sent this exact message recently.' });
   }
 
-  // 4. Save to Database
+  // 4. Save to Database ALWAYS
   const result = db.prepare(`
     INSERT INTO contact_messages (user_id, username, message, status, delivered_to_telegram, user_agent, ip_address)
     VALUES (?, ?, ?, 'pending_retry', 0, ?, ?)
@@ -65,10 +65,10 @@ router.post('/', async (req, res) => {
 
   const messageId = result.lastInsertRowid;
   const serverTime = new Date().toLocaleString();
-  console.log(`💾 [CONTACT FLOW STEP 2] Database saved successfully (Message ID: #${messageId})`);
+  console.log(`💾 [CONTACT FLOW STEP 2] Saved contact message to DB with ID: #${messageId}`);
 
   // 5. Send to Telegram API
-  console.log('🚀 [CONTACT FLOW STEP 3] Sending request to Telegram Bot API...');
+  console.log('🚀 [CONTACT FLOW STEP 3] Attempting Telegram delivery...');
   const telegramRes = await sendTelegramContactNotification({
     username,
     userId,
@@ -86,7 +86,7 @@ router.post('/', async (req, res) => {
       WHERE id = ?
     `).run(messageId);
 
-    console.log('✅ [CONTACT FLOW STEP 4 SUCCESS] Telegram message delivered & DB status updated');
+    console.log('✅ [CONTACT FLOW STEP 4 SUCCESS] Delivered to Telegram & DB updated');
     console.log('==================================================\n');
 
     return res.json({
@@ -96,15 +96,18 @@ router.post('/', async (req, res) => {
       responseMessage: 'Your message has been sent successfully.'
     });
   } else {
-    // Log Telegram Failure & Return exact error to client
-    console.error('❌ [CONTACT FLOW STEP 4 FAILURE] Telegram API failed:', telegramRes.error);
+    // Log exact Telegram diagnostic error in server logs
+    console.warn('⚠️ [CONTACT FLOW STEP 4 QUEUED] Telegram delivery pending/failed:', telegramRes.error);
     console.log('==================================================\n');
 
-    return res.status(500).json({
-      success: false,
+    // Schedule background retry attempt
+    setTimeout(() => retryPendingTelegramMessages(), 5000);
+
+    return res.json({
+      success: true,
       delivered: false,
       messageId,
-      error: telegramRes.error || 'Telegram delivery failed.'
+      responseMessage: 'Your message has been received and will be delivered shortly.'
     });
   }
 });

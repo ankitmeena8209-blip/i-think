@@ -3,18 +3,51 @@ import React, { useState } from 'react';
 export default function ContactModal({ isOpen, onClose }) {
   const [submitted, setSubmitted] = useState(false);
   const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [statusText, setStatusText] = useState('Thank you. Your message has been received.');
+  const [errorMsg, setErrorMsg] = useState('');
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!message.trim()) return;
-    setSubmitted(true);
-    setTimeout(() => {
-      setSubmitted(false);
-      setMessage('');
-      onClose();
-    }, 2000);
+    const trimmed = message.trim();
+    if (!trimmed) return;
+
+    if (trimmed.length > 1000) {
+      setErrorMsg('Message cannot exceed 1000 characters.');
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: trimmed })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setStatusText(data.responseMessage || 'Your message has been sent successfully.');
+        setSubmitted(true);
+        setTimeout(() => {
+          setSubmitted(false);
+          setMessage('');
+          onClose();
+        }, 2000);
+      } else {
+        setErrorMsg(data.error || 'Failed to send message. Please try again.');
+      }
+    } catch (err) {
+      console.error('Contact submission error:', err);
+      setErrorMsg('Network error. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -41,24 +74,40 @@ export default function ContactModal({ isOpen, onClose }) {
               check_circle
             </span>
             <p className="font-body-lg text-primary dark:text-[#FAFAF8]">
-              Thank you. Your message has been received.
+              {statusText}
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="font-label-sm text-secondary uppercase tracking-widest block mb-2">
-                Message
-              </label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="font-label-sm text-secondary uppercase tracking-widest block">
+                  Message
+                </label>
+                <span className="font-label-sm text-outline dark:text-dark-secondary">
+                  {message.length}/1000
+                </span>
+              </div>
               <textarea
                 required
                 rows={4}
+                maxLength={1000}
                 value={message}
-                onChange={(e) => setMessage(e.target.value)}
+                onChange={(e) => {
+                  setMessage(e.target.value);
+                  setErrorMsg('');
+                }}
                 placeholder="Write your thought or message here..."
                 className="w-full bg-surface-container-lowest dark:bg-[#111111] border border-outline-variant dark:border-[#333333] rounded-[14px] p-4 text-primary dark:text-white focus:outline-none focus:border-primary dark:focus:border-white transition-colors"
               />
             </div>
+
+            {errorMsg && (
+              <p className="font-label-sm text-error dark:text-red-400">
+                {errorMsg}
+              </p>
+            )}
+
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -69,9 +118,10 @@ export default function ContactModal({ isOpen, onClose }) {
               </button>
               <button
                 type="submit"
-                className="bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] font-label-md px-6 py-3 rounded-[14px] hover:opacity-80 transition-opacity"
+                disabled={submitting || !message.trim()}
+                className="bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] font-label-md px-6 py-3 rounded-[14px] hover:opacity-80 transition-opacity disabled:opacity-50 cursor-pointer"
               >
-                Send Message
+                {submitting ? 'Sending...' : 'Send Message'}
               </button>
             </div>
           </form>

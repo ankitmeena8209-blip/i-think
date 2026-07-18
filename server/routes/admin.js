@@ -47,7 +47,39 @@ router.post('/change-password', requireAdmin, (req, res) => {
 router.get('/stats', requireAdmin, (req, res) => {
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
   const thoughtCount = db.prepare('SELECT COUNT(*) as count FROM thoughts').get().count;
-  return res.json({ userCount, thoughtCount });
+  const contactCount = db.prepare('SELECT COUNT(*) as count FROM contact_messages').get().count;
+  return res.json({ userCount, thoughtCount, contactCount });
+});
+
+// GET /api/admin/contact-messages
+router.get('/contact-messages', requireAdmin, (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+  let query = 'SELECT id, user_id, username, message, status, delivered_to_telegram, user_agent, ip_address, created_at FROM contact_messages';
+  const params = [];
+
+  if (search) {
+    query += ' WHERE (username LIKE ? OR CAST(user_id AS TEXT) LIKE ? OR message LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  query += ' ORDER BY created_at DESC LIMIT 100';
+
+  const messages = db.prepare(query).all(...params);
+  return res.json({ messages });
+});
+
+// DELETE /api/admin/contact-messages/:id
+router.delete('/contact-messages/:id', requireAdmin, (req, res) => {
+  const msgId = parseInt(req.params.id, 10);
+  if (!msgId) return res.status(400).json({ error: 'Invalid message ID.' });
+
+  const result = db.prepare('DELETE FROM contact_messages WHERE id = ?').run(msgId);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'Message not found.' });
+  }
+
+  return res.json({ success: true, message: 'Contact message deleted permanently.' });
 });
 
 // DELETE /api/admin/thoughts/:id

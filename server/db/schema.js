@@ -56,9 +56,23 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS contact_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'pending_retry',
+    delivered_to_telegram INTEGER DEFAULT 0,
+    user_agent TEXT,
+    ip_address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS idx_thoughts_created_at ON thoughts(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_thoughts_username ON thoughts(username);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_contact_created_at ON contact_messages(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_contact_status ON contact_messages(status);
 `);
 
 // Migration helper for existing DBs

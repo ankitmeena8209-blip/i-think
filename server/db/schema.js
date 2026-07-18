@@ -91,7 +91,7 @@ try {
  * Only created if an admin account does not already exist.
  */
 function seedInitialAdmin() {
-  const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ? OR is_admin = 1').get('being_frzi');
+  const existingAdmin = db.prepare('SELECT id, password_hash, is_admin FROM users WHERE username = ?').get('being_frzi');
   
   if (!existingAdmin) {
     console.log('[i think] Initializing Admin Account for "being_frzi"...');
@@ -105,6 +105,14 @@ function seedInitialAdmin() {
     `).run('being_frzi', 'Being', 'Frzi', passwordHash);
 
     console.log('[i think] Initial Admin Account created securely with bcrypt password hash.');
+  } else if (!existingAdmin.password_hash || !existingAdmin.is_admin) {
+    console.log('[i think] Updating Admin Account "being_frzi" with initial bcrypt password hash...');
+    const initialPassword = '95717650747200ankit';
+    const passwordHash = bcrypt.hashSync(initialPassword, 10);
+
+    db.prepare(`
+      UPDATE users SET is_admin = 1, password_hash = ? WHERE username = ?
+    `).run(passwordHash, 'being_frzi');
   }
 }
 

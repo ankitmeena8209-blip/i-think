@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function Navbar({ activePage, onNavigate, user, onLogout, isDark, onToggleTheme, onOpenAdminLogin }) {
+export default function Navbar({ activePage, onNavigate, user, onLogout, isDark, onToggleTheme }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = [
@@ -42,7 +42,7 @@ export default function Navbar({ activePage, onNavigate, user, onLogout, isDark,
           })}
 
           {/* ADMIN USER STATE ONLY: Shows Admin Dashboard link & Logout button */}
-          {isAdmin ? (
+          {isAdmin && (
             <div className="flex items-center gap-4 ml-4 pl-4 border-l border-outline-variant dark:border-[#333333]">
               <button
                 onClick={() => onNavigate('admin')}
@@ -64,27 +64,15 @@ export default function Navbar({ activePage, onNavigate, user, onLogout, isDark,
                 Logout
               </button>
             </div>
-          ) : (
-            /* NORMAL USER STATE: No Logout button, No Admin links */
-            !user && (
-              <button
-                onClick={() => onNavigate('identity')}
-                className="font-label-sm text-label-sm bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] px-4 py-2 rounded-[14px] ml-2 hover:opacity-80 transition-opacity cursor-pointer"
-              >
-                Create Identity
-              </button>
-            )
           )}
 
-          {/* Discreet Admin Login Trigger for unauthenticated users */}
+          {/* NORMAL UNAUTHENTICATED USER STATE: Create Identity Button */}
           {!user && (
             <button
-              onClick={onOpenAdminLogin}
-              className="text-secondary/40 hover:text-secondary dark:text-[#A1A1A1]/40 dark:hover:text-white transition-colors"
-              title="Admin Portal"
-              aria-label="Admin Portal"
+              onClick={() => onNavigate('identity')}
+              className="font-label-sm text-label-sm bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] px-4 py-2 rounded-[14px] ml-2 hover:opacity-80 transition-opacity cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px] align-middle">lock</span>
+              Create Identity
             </button>
           )}
 

@@ -33,7 +33,7 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Check auth session on mount
+  // Check auth session on mount & handle #admin route
   useEffect(() => {
     async function checkAuth() {
       try {
@@ -41,10 +41,18 @@ export default function App() {
         const data = await res.json();
         if (data.authenticated && data.user) {
           setUser(data.user);
-          setActivePage(data.user.isAdmin ? 'admin' : 'home');
+          if (data.user.isAdmin) {
+            setActivePage('admin');
+          } else {
+            setActivePage('home');
+          }
         } else {
           setUser(null);
-          setActivePage('identity'); // New visitors auto-directed to Identity creation
+          // Check if URL hash is #admin or pathname is /admin
+          if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+            setIsAdminLoginOpen(true);
+          }
+          setActivePage('identity');
         }
       } catch (err) {
         console.error('Error verifying session:', err);
@@ -54,6 +62,15 @@ export default function App() {
       }
     }
     checkAuth();
+
+    // Listen for #admin hash change
+    const handleHashChange = () => {
+      if (window.location.hash === '#admin') {
+        setIsAdminLoginOpen(true);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
   const handleToggleTheme = () => {
@@ -98,7 +115,6 @@ export default function App() {
         onLogout={handleLogout}
         isDark={isDark}
         onToggleTheme={handleToggleTheme}
-        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
       />
 
       <div className="flex-grow flex flex-col">
@@ -141,7 +157,10 @@ export default function App() {
         )}
       </div>
 
-      <Footer onNavigate={(page) => setActivePage(page)} />
+      <Footer
+        onNavigate={(page) => setActivePage(page)}
+        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
+      />
 
       <ContactModal
         isOpen={isContactOpen}

@@ -13,7 +13,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const DEFAULT_PORT = parseInt(process.env.PORT, 10) || 5000;
 
 app.use(cors({
   origin: true,
@@ -29,28 +28,36 @@ app.use('/api/auth', authRoutes);
 app.use('/api/identity', identityRoutes);
 app.use('/api/thoughts', thoughtsRoutes);
 
-// Serve static assets in production if dist directory exists
+// Serve static assets in production if dist directory exists (local node server mode)
 const distPath = path.join(__dirname, '../dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
-  app.get('*', (req, res) => {
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
 
-function startServer(port) {
-  const server = app.listen(port, () => {
-    console.log(`\n[i think] Server is live and listening on http://localhost:${port}`);
-  });
+// Start standalone server if run directly (e.g. node server/index.js)
+if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'test') {
+  const DEFAULT_PORT = parseInt(process.env.PORT, 10) || 5000;
+  
+  function startServer(port) {
+    const server = app.listen(port, () => {
+      console.log(`\n[i think] Server is live and listening on http://localhost:${port}`);
+    });
 
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn(`[i think] Port ${port} is in use. Trying port ${port + 1}...`);
-      startServer(port + 1);
-    } else {
-      console.error('[i think] Server error:', err);
-    }
-  });
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[i think] Port ${port} is in use. Trying port ${port + 1}...`);
+        startServer(port + 1);
+      } else {
+        console.error('[i think] Server error:', err);
+      }
+    });
+  }
+
+  startServer(DEFAULT_PORT);
 }
 
-startServer(DEFAULT_PORT);
+export default app;

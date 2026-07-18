@@ -6,7 +6,10 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbDir = path.join(__dirname);
+// On Vercel, the filesystem is read-only except /tmp
+const isVercel = process.env.VERCEL === '1' || process.env.NOW_BUILDER;
+const dbDir = isVercel ? '/tmp' : path.join(__dirname);
+
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
@@ -14,8 +17,12 @@ if (!fs.existsSync(dbDir)) {
 const dbPath = path.join(dbDir, 'ithink.db');
 const db = new Database(dbPath);
 
-// Enable WAL mode for better performance and concurrency
-db.pragma('journal_mode = WAL');
+// Enable WAL mode for local performance if not memory
+try {
+  db.pragma('journal_mode = WAL');
+} catch (e) {
+  // Ignore WAL pragma if in constrained serverless env
+}
 
 // Create tables
 db.exec(`

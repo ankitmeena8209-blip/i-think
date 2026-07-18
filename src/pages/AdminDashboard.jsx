@@ -1,23 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
 export default function AdminDashboard({ user, onNavigate }) {
-  const [activeTab, setActiveTab] = useState('messages'); // 'messages' | 'security'
+  const [activeTab, setActiveTab] = useState('messages'); // 'messages' | 'users' | 'security'
   const [stats, setStats] = useState({ userCount: 0, thoughtCount: 0, contactCount: 0 });
   const [loadingStats, setLoadingStats] = useState(true);
 
-  // Contact messages state
+  // 1. MESSAGES SEARCH & LIST STATE
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [messagesSearchQuery, setMessagesSearchQuery] = useState('');
 
-  // Password change form state
+  // 2. USERS SEARCH & LIST STATE (Completely independent from messages)
+  const [usersList, setUsersList] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [usersSearchQuery, setUsersSearchQuery] = useState('');
+
+  // 3. SECURITY & PASSWORD STATE
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPass, setChangingPass] = useState(false);
   const [passStatus, setPassStatus] = useState({ error: '', success: '' });
 
+  // Fetch admin stats
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/stats');
@@ -32,6 +37,7 @@ export default function AdminDashboard({ user, onNavigate }) {
     }
   }, []);
 
+  // Fetch contact messages (Messages Search)
   const fetchContactMessages = useCallback(async (query = '') => {
     setLoadingMessages(true);
     try {
@@ -48,23 +54,65 @@ export default function AdminDashboard({ user, onNavigate }) {
     }
   }, []);
 
+  // Fetch users list (Users Search)
+  const fetchUsers = useCallback(async (query = '') => {
+    setLoadingUsers(true);
+    try {
+      const url = query ? `/api/admin/users?search=${encodeURIComponent(query)}` : '/api/admin/users';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setUsersList(data.users || []);
+      }
+    } catch (err) {
+      console.error('Error fetching users list:', err);
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchStats();
-    fetchContactMessages(searchQuery);
-  }, [fetchStats, fetchContactMessages, searchQuery]);
+  }, [fetchStats]);
 
+  useEffect(() => {
+    if (activeTab === 'messages') {
+      fetchContactMessages(messagesSearchQuery);
+    }
+  }, [activeTab, messagesSearchQuery, fetchContactMessages]);
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      fetchUsers(usersSearchQuery);
+    }
+  }, [activeTab, usersSearchQuery, fetchUsers]);
+
+  // Handlers
   const handleDeleteMessage = async (msgId) => {
-    if (!window.confirm('Are you sure you want to permanently delete this message?')) return;
+    if (!window.confirm('Are you sure you want to permanently delete this contact message?')) return;
 
     try {
       const res = await fetch(`/api/admin/contact-messages/${msgId}`, { method: 'DELETE' });
       if (res.ok) {
         setMessages((prev) => prev.filter((m) => m.id !== msgId));
-        if (selectedMessage?.id === msgId) setSelectedMessage(null);
         fetchStats();
       }
     } catch (err) {
       console.error('Error deleting message:', err);
+    }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm('Are you sure you want to permanently delete this user identity?')) return;
+
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setUsersList((prev) => prev.filter((u) => u.id !== userId));
+        fetchStats();
+      }
+    } catch (err) {
+      console.error('Error deleting user:', err);
     }
   };
 
@@ -99,12 +147,12 @@ export default function AdminDashboard({ user, onNavigate }) {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setPassStatus({ error: '', success: 'Password changed successfully!' });
+        setPassStatus({ error: '', success: 'Password updated successfully.' });
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
       } else {
-        setPassStatus({ error: data.error || 'Failed to change password.', success: '' });
+        setPassStatus({ error: data.error || 'Failed to update password.', success: '' });
       }
     } catch (err) {
       console.error('Password change error:', err);
@@ -134,7 +182,7 @@ export default function AdminDashboard({ user, onNavigate }) {
 
         <button
           onClick={() => onNavigate('home')}
-          className="px-5 py-2.5 rounded-[14px] border border-outline-variant dark:border-[#333333] text-primary dark:text-white font-label-md hover:bg-surface-container-low dark:hover:bg-[#222222] transition-colors"
+          className="px-5 py-2.5 rounded-[14px] border border-outline-variant dark:border-[#333333] text-primary dark:text-white font-label-md hover:bg-surface-container-low dark:hover:bg-[#222222] transition-colors cursor-pointer"
         >
           ← Back to Feed
         </button>
@@ -170,11 +218,11 @@ export default function AdminDashboard({ user, onNavigate }) {
         </div>
       </section>
 
-      {/* Tab Navigation */}
+      {/* Admin Tab Navigation */}
       <div className="flex gap-4 border-b border-outline-variant dark:border-[#333333] pb-2">
         <button
           onClick={() => setActiveTab('messages')}
-          className={`font-label-md py-2 px-4 rounded-t-lg transition-colors border-b-2 ${
+          className={`font-label-md py-2 px-4 rounded-t-lg transition-colors border-b-2 cursor-pointer ${
             activeTab === 'messages'
               ? 'border-primary dark:border-white text-primary dark:text-white font-semibold'
               : 'border-transparent text-secondary dark:text-[#A1A1A1] hover:text-primary dark:hover:text-white'
@@ -184,8 +232,19 @@ export default function AdminDashboard({ user, onNavigate }) {
         </button>
 
         <button
+          onClick={() => setActiveTab('users')}
+          className={`font-label-md py-2 px-4 rounded-t-lg transition-colors border-b-2 cursor-pointer ${
+            activeTab === 'users'
+              ? 'border-primary dark:border-white text-primary dark:text-white font-semibold'
+              : 'border-transparent text-secondary dark:text-[#A1A1A1] hover:text-primary dark:hover:text-white'
+          }`}
+        >
+          User Identities ({stats.userCount})
+        </button>
+
+        <button
           onClick={() => setActiveTab('security')}
-          className={`font-label-md py-2 px-4 rounded-t-lg transition-colors border-b-2 ${
+          className={`font-label-md py-2 px-4 rounded-t-lg transition-colors border-b-2 cursor-pointer ${
             activeTab === 'security'
               ? 'border-primary dark:border-white text-primary dark:text-white font-semibold'
               : 'border-transparent text-secondary dark:text-[#A1A1A1] hover:text-primary dark:hover:text-white'
@@ -195,29 +254,40 @@ export default function AdminDashboard({ user, onNavigate }) {
         </button>
       </div>
 
-      {/* TAB 1: CONTACT MESSAGES */}
+      {/* TAB 1: CONTACT MESSAGES SEARCH & LIST */}
       {activeTab === 'messages' && (
         <section className="space-y-6">
-          {/* Search bar */}
-          <div className="relative w-full max-w-md">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-secondary dark:text-dark-secondary text-[20px]">
-              search
-            </span>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by Username, User ID, or Message..."
-              className="w-full pl-10 pr-4 py-2.5 bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] text-body-md text-primary dark:text-white placeholder:text-outline focus:outline-none focus:border-primary dark:focus:border-white"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs"
-              >
-                Clear
-              </button>
-            )}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h2 className="font-headline-md text-headline-md text-primary dark:text-white">
+                Contact Messages Search
+              </h2>
+              <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
+                Search specifically by Username, User ID, or Message Content.
+              </p>
+            </div>
+
+            {/* Dedicated Messages Search Input */}
+            <div className="relative w-full max-w-md">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-secondary dark:text-dark-secondary text-[20px]">
+                search
+              </span>
+              <input
+                type="text"
+                value={messagesSearchQuery}
+                onChange={(e) => setMessagesSearchQuery(e.target.value)}
+                placeholder="Search Username, User ID, or Message..."
+                className="w-full pl-10 pr-8 py-2.5 bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] text-body-md text-primary dark:text-white placeholder:text-outline focus:outline-none focus:border-primary dark:focus:border-white"
+              />
+              {messagesSearchQuery && (
+                <button
+                  onClick={() => setMessagesSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-primary dark:hover:text-white text-xs"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Messages List */}
@@ -227,7 +297,7 @@ export default function AdminDashboard({ user, onNavigate }) {
             <div className="py-12 text-center border border-dashed border-outline-variant dark:border-[#333333] rounded-[14px]">
               <span className="material-symbols-outlined text-4xl text-outline mb-2">mail</span>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                {searchQuery ? 'No messages match your search.' : 'No contact messages received yet.'}
+                {messagesSearchQuery ? 'No contact messages match your search.' : 'No contact messages received yet.'}
               </p>
             </div>
           ) : (
@@ -235,7 +305,7 @@ export default function AdminDashboard({ user, onNavigate }) {
               {messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 transition-all space-y-4"
+                  className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 space-y-4"
                 >
                   <div className="flex flex-wrap justify-between items-start gap-2 border-b border-outline-variant/40 dark:border-[#333333] pb-3">
                     <div className="flex items-center gap-3">
@@ -243,7 +313,7 @@ export default function AdminDashboard({ user, onNavigate }) {
                         👤 {msg.username}
                       </span>
                       <span className="font-label-sm text-secondary dark:text-[#A1A1A1] bg-surface dark:bg-[#111111] px-2 py-0.5 rounded-full border border-outline-variant/30">
-                        ID: {msg.user_id ? msg.user_id : 'Anonymous'}
+                        User ID: {msg.user_id ? msg.user_id : 'N/A'}
                       </span>
                     </div>
 
@@ -264,7 +334,7 @@ export default function AdminDashboard({ user, onNavigate }) {
 
                       <button
                         onClick={() => handleDeleteMessage(msg.id)}
-                        className="text-error hover:text-red-600 p-1 text-sm font-label-sm ml-2"
+                        className="text-error hover:text-red-600 p-1 text-sm font-label-sm cursor-pointer ml-2"
                         title="Delete permanently"
                       >
                         Delete
@@ -287,7 +357,90 @@ export default function AdminDashboard({ user, onNavigate }) {
         </section>
       )}
 
-      {/* TAB 2: SECURITY & PASSWORD */}
+      {/* TAB 2: USERS SEARCH & LIST (Completely independent from Messages) */}
+      {activeTab === 'users' && (
+        <section className="space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h2 className="font-headline-md text-headline-md text-primary dark:text-white">
+                Users Search
+              </h2>
+              <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
+                Search specifically by Username or User ID.
+              </p>
+            </div>
+
+            {/* Dedicated Users Search Input */}
+            <div className="relative w-full max-w-md">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-secondary dark:text-dark-secondary text-[20px]">
+                search
+              </span>
+              <input
+                type="text"
+                value={usersSearchQuery}
+                onChange={(e) => setUsersSearchQuery(e.target.value)}
+                placeholder="Search Username or User ID..."
+                className="w-full pl-10 pr-8 py-2.5 bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] text-body-md text-primary dark:text-white placeholder:text-outline focus:outline-none focus:border-primary dark:focus:border-white"
+              />
+              {usersSearchQuery && (
+                <button
+                  onClick={() => setUsersSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-primary dark:hover:text-white text-xs"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Users List */}
+          {loadingUsers ? (
+            <div className="py-8 text-center text-secondary">Loading user identities...</div>
+          ) : usersList.length === 0 ? (
+            <div className="py-12 text-center border border-dashed border-outline-variant dark:border-[#333333] rounded-[14px]">
+              <span className="material-symbols-outlined text-4xl text-outline mb-2">person_search</span>
+              <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
+                {usersSearchQuery ? 'No user identities match your search.' : 'No user identities registered yet.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {usersList.map((usr) => (
+                <div
+                  key={usr.id}
+                  className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 flex justify-between items-center"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-label-md text-primary dark:text-white font-semibold text-lg">
+                        {usr.username}
+                      </span>
+                      <span className="font-label-sm text-xs text-secondary dark:text-[#A1A1A1] bg-surface dark:bg-[#111111] px-2 py-0.5 rounded-full border border-outline-variant/30">
+                        ID: #{usr.id}
+                      </span>
+                    </div>
+                    <p className="font-label-sm text-xs text-secondary dark:text-[#A1A1A1]">
+                      Words: <span className="font-medium text-primary dark:text-white">{usr.word1}</span> + <span className="font-medium text-primary dark:text-white">{usr.word2}</span>
+                    </p>
+                    <p className="font-label-sm text-xs text-outline dark:text-dark-secondary">
+                      Created: {new Date(usr.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => handleDeleteUser(usr.id)}
+                    className="text-error hover:text-red-600 font-label-sm text-xs px-3 py-1.5 rounded-[14px] border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                  >
+                    Delete User
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* TAB 3: SECURITY & PASSWORD CHANGE */}
       {activeTab === 'security' && (
         <section className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-8 md:p-12 max-w-2xl">
           <h2 className="font-headline-md text-headline-md text-primary dark:text-[#FAFAF8] mb-2">

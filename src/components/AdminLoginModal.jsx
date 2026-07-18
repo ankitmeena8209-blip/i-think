@@ -25,6 +25,8 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
       const data = await res.json();
       if (res.ok && data.success) {
         onLoginSuccess(data.user);
+        setUsername('');
+        setPassword('');
         onClose();
       } else {
         setErrorMsg(data.error || 'Invalid credentials.');
@@ -41,7 +43,11 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm fade-in">
       <div className="w-full max-w-md bg-surface dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-8 relative shadow-xl">
         <button
-          onClick={onClose}
+          onClick={() => {
+            setUsername('');
+            setPassword('');
+            onClose();
+          }}
           className="absolute top-4 right-4 text-secondary hover:text-primary dark:hover:text-white transition-colors"
           aria-label="Close"
         >
@@ -57,7 +63,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
           Log in with administrator credentials.
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
           <div>
             <label className="font-label-sm text-secondary uppercase tracking-widest block mb-1">
               Admin Username
@@ -65,9 +71,13 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
             <input
               type="text"
               required
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck="false"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. being_frzi"
+              placeholder="Username"
               className="w-full bg-surface-container-lowest dark:bg-[#111111] border border-outline-variant dark:border-[#333333] rounded-[14px] p-3 text-primary dark:text-white focus:outline-none focus:border-primary dark:focus:border-white"
             />
           </div>
@@ -79,6 +89,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
             <input
               type="password"
               required
+              autoComplete="off"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
@@ -95,7 +106,11 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                setUsername('');
+                setPassword('');
+                onClose();
+              }}
               className="px-5 py-3 font-label-md text-secondary hover:text-primary dark:hover:text-white"
             >
               Cancel

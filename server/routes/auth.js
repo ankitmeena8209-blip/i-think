@@ -64,22 +64,24 @@ router.post('/admin-login', (req, res) => {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }
 
-  let user = db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE username = ?').get(adminUserEnv);
+  let user = db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE is_admin = 1 OR username = ?').get(adminUserEnv);
+
+  const newHash = bcrypt.hashSync(adminPassEnv, 10);
 
   if (!user) {
-    const passwordHash = bcrypt.hashSync(adminPassEnv, 10);
     const result = db.prepare(`
       INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
       VALUES (?, 'Admin', 'User', 1, ?, '127.0.0.1')
-    `).run(adminUserEnv, passwordHash);
-    user = { id: result.lastInsertRowid, username: adminUserEnv, is_admin: 1, password_hash: passwordHash };
+    `).run(adminUserEnv, newHash);
+    user = { id: result.lastInsertRowid, username: adminUserEnv, is_admin: 1, password_hash: newHash };
+  } else if (user.username !== adminUserEnv || !user.password_hash || !user.is_admin) {
+    db.prepare('UPDATE users SET username = ?, is_admin = 1, password_hash = ? WHERE id = ?').run(adminUserEnv, newHash, user.id);
+    user.username = adminUserEnv;
+    user.is_admin = 1;
+    user.password_hash = newHash;
   }
 
-  if (!user.is_admin || !user.password_hash) {
-    return res.status(401).json({ error: 'Invalid admin credentials.' });
-  }
-
-  const isPasswordValid = bcrypt.compareSync(password, user.password_hash) || (password === adminPassEnv);
+  const isPasswordValid = (password === adminPassEnv) || (user.password_hash && bcrypt.compareSync(password, user.password_hash));
   if (!isPasswordValid) {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }

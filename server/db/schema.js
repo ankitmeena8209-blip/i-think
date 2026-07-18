@@ -91,7 +91,8 @@ try {
 
 /**
  * Seed Initial Admin Account
- * Ensures admin account configured via ADMIN_USER & ADMIN_PASS environment variables exists.
+ * Ensures admin account in DB is synced with ADMIN_USER & ADMIN_PASS environment variables.
+ * Automatically updates old admin username and password hash in DB if environment variables change.
  */
 function seedInitialAdmin() {
   const adminUsername = process.env.ADMIN_USER;
@@ -102,25 +103,27 @@ function seedInitialAdmin() {
     return;
   }
 
-  const existingAdmin = db.prepare('SELECT id, password_hash, is_admin FROM users WHERE username = ?').get(adminUsername);
-  
-  if (!existingAdmin) {
-    console.log(`[i think DB] Initializing Admin Account for "${adminUsername}"...`);
-    const passwordHash = bcrypt.hashSync(adminPassword, 10);
+  const newHash = bcrypt.hashSync(adminPassword, 10);
 
+  // Check if any admin account currently exists (by username or is_admin flag)
+  const existingAdmin = db.prepare('SELECT id, username, password_hash, is_admin FROM users WHERE is_admin = 1 OR username = ?').get(adminUsername);
+
+  if (existingAdmin) {
+    // Update existing admin account with the latest ADMIN_USER and ADMIN_PASS from environment
+    db.prepare(`
+      UPDATE users 
+      SET username = ?, is_admin = 1, password_hash = ?
+      WHERE id = ?
+    `).run(adminUsername, newHash, existingAdmin.id);
+    console.log(`[i think DB] Admin Account (ID: ${existingAdmin.id}) synced with environment variables: username="${adminUsername}".`);
+  } else {
+    // Create new admin account
+    console.log(`[i think DB] Creating new Admin Account for "${adminUsername}"...`);
     db.prepare(`
       INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
-      VALUES (?, ?, ?, 1, ?, '127.0.0.1')
-    `).run(adminUsername, 'Admin', 'User', passwordHash);
-
-    console.log('[i think DB] Initial Admin Account created securely with bcrypt password hash.');
-  } else if (!existingAdmin.password_hash || !existingAdmin.is_admin) {
-    console.log(`[i think DB] Updating Admin Account "${adminUsername}" with initial bcrypt password hash...`);
-    const passwordHash = bcrypt.hashSync(adminPassword, 10);
-
-    db.prepare(`
-      UPDATE users SET is_admin = 1, password_hash = ? WHERE username = ?
-    `).run(passwordHash, adminUsername);
+      VALUES (?, 'Admin', 'User', 1, ?, '127.0.0.1')
+    `).run(adminUsername, newHash);
+    console.log('[i think DB] Admin Account created securely with environment credentials.');
   }
 }
 

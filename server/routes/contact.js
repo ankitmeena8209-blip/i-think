@@ -8,7 +8,7 @@ const router = express.Router();
 
 // POST /api/contact
 router.post('/', async (req, res) => {
-  const user = getSessionUser(req);
+  const user = await getSessionUser(req);
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
   const userAgent = req.headers['user-agent'] || 'Unknown Browser';
 
@@ -48,7 +48,7 @@ router.post('/', async (req, res) => {
   const userId = user ? user.id : null;
 
   // 3. Duplicate Message Prevention (identical message within 5 minutes)
-  const duplicate = db.prepare(`
+  const duplicate = await db.prepare(`
     SELECT id FROM contact_messages 
     WHERE (user_id = ? OR ip_address = ?) AND message = ? AND created_at > datetime('now', '-5 minutes')
   `).get(userId || -1, clientIp, trimmedMessage);
@@ -59,7 +59,7 @@ router.post('/', async (req, res) => {
   }
 
   // 4. Save to Database
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO contact_messages (user_id, username, message, status, delivered_to_telegram, user_agent, ip_address)
     VALUES (?, ?, ?, 'pending_retry', 0, ?, ?)
   `).run(userId, username, trimmedMessage, userAgent, clientIp);
@@ -81,7 +81,7 @@ router.post('/', async (req, res) => {
 
   if (telegramRes.success) {
     // Update DB status to delivered
-    db.prepare(`
+    await db.prepare(`
       UPDATE contact_messages 
       SET delivered_to_telegram = 1, status = 'delivered' 
       WHERE id = ?

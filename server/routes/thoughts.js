@@ -6,7 +6,7 @@ import { sanitizeText, containsProfanity, checkRateLimit } from '../utils/modera
 const router = express.Router();
 
 // GET /api/thoughts
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const sort = req.query.sort === 'top' ? 'top' : 'latest';
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -31,7 +31,7 @@ router.get('/', (req, res) => {
   query += ' LIMIT ? OFFSET ?';
   params.push(limit + 1, offset); // Fetch 1 extra to check if hasMore
 
-  const rows = db.prepare(query).all(...params);
+  const rows = await db.prepare(query).all(...params);
   const hasMore = rows.length > limit;
   const thoughts = hasMore ? rows.slice(0, limit) : rows;
 
@@ -39,8 +39,8 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/thoughts
-router.post('/', (req, res) => {
-  const user = getSessionUser(req);
+router.post('/', async (req, res) => {
+  const user = await getSessionUser(req);
   if (!user) {
     return res.status(401).json({ error: 'You must create an identity to publish thoughts.' });
   }
@@ -72,12 +72,12 @@ router.post('/', (req, res) => {
   const sanitizedContent = sanitizeText(content);
 
   try {
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO thoughts (user_id, username, content, ip_address)
       VALUES (?, ?, ?, ?)
     `).run(user.id, user.username, sanitizedContent, clientIp);
 
-    const newThought = db.prepare(`
+    const newThought = await db.prepare(`
       SELECT id, username, content, created_at FROM thoughts WHERE id = ?
     `).get(result.lastInsertRowid);
 

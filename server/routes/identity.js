@@ -19,13 +19,13 @@ const natureWords = JSON.parse(
 const router = express.Router();
 
 // Helper to check if a username exists in DB
-function isUsernameTaken(username) {
-  const row = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+async function isUsernameTaken(username) {
+  const row = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   return !!row;
 }
 
 // Helper to generate N unique available suggestions
-function generateSuggestions(requestedW1, requestedW2, count = 6) {
+async function generateSuggestions(requestedW1, requestedW2, count = 6) {
   const suggestions = [];
   const attemptsLimit = 100;
   let attempts = 0;
@@ -50,7 +50,7 @@ function generateSuggestions(requestedW1, requestedW2, count = 6) {
     w2 = capitalizeWord(w2);
     const combined = `${w1}${w2}`;
 
-    if (!isUsernameTaken(combined) && !suggestions.some(s => s.username === combined)) {
+    if (!(await isUsernameTaken(combined)) && !suggestions.some(s => s.username === combined)) {
       suggestions.push({ word1: w1, word2: w2, username: combined });
     }
   }
@@ -59,7 +59,7 @@ function generateSuggestions(requestedW1, requestedW2, count = 6) {
 }
 
 // POST /api/identity/check
-router.post('/check', (req, res) => {
+router.post('/check', async (req, res) => {
   const { word1, word2 } = req.body || {};
 
   const v1 = validateWord(word1);
@@ -76,8 +76,8 @@ router.post('/check', (req, res) => {
   const w2 = capitalizeWord(word2);
   const username = `${w1}${w2}`;
 
-  if (isUsernameTaken(username)) {
-    const suggestions = generateSuggestions(w1, w2, 6);
+  if (await isUsernameTaken(username)) {
+    const suggestions = await generateSuggestions(w1, w2, 6);
     return res.json({
       available: false,
       reason: 'This identity is already taken.',
@@ -95,7 +95,7 @@ router.post('/check', (req, res) => {
 });
 
 // POST /api/identity/generate
-router.post('/generate', (req, res) => {
+router.post('/generate', async (req, res) => {
   let attempts = 0;
   let found = null;
 
@@ -105,7 +105,7 @@ router.post('/generate', (req, res) => {
     const w2 = capitalizeWord(natureWords[Math.floor(Math.random() * natureWords.length)]);
     const username = `${w1}${w2}`;
 
-    if (!isUsernameTaken(username)) {
+    if (!(await isUsernameTaken(username))) {
       found = { word1: w1, word2: w2, username };
       break;
     }
@@ -119,7 +119,7 @@ router.post('/generate', (req, res) => {
 });
 
 // POST /api/identity/create
-router.post('/create', (req, res) => {
+router.post('/create', async (req, res) => {
   const { word1, word2 } = req.body || {};
 
   const v1 = validateWord(word1);
@@ -132,8 +132,8 @@ router.post('/create', (req, res) => {
   const w2 = capitalizeWord(word2);
   const username = `${w1}${w2}`;
 
-  if (isUsernameTaken(username)) {
-    const suggestions = generateSuggestions(w1, w2, 6);
+  if (await isUsernameTaken(username)) {
+    const suggestions = await generateSuggestions(w1, w2, 6);
     return res.status(409).json({
       error: 'This identity is already taken.',
       suggestions
@@ -143,7 +143,7 @@ router.post('/create', (req, res) => {
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   try {
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO users (username, word1, word2, ip_address)
       VALUES (?, ?, ?, ?)
     `).run(username, w1, w2, clientIp);
@@ -152,7 +152,7 @@ router.post('/create', (req, res) => {
     const sessionToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO sessions (token, user_id, expires_at)
       VALUES (?, ?, ?)
     `).run(sessionToken, userId, expiresAt);

@@ -7,12 +7,12 @@ import { checkRateLimit } from '../utils/moderation.js';
 const router = express.Router();
 
 // Helper to get active session user
-export function getSessionUser(req) {
+export async function getSessionUser(req) {
   const token = req.cookies?.ithink_session;
   if (!token) return null;
 
   try {
-    const session = db.prepare(`
+    const session = await db.prepare(`
       SELECT s.token, s.expires_at, u.id, u.username, u.is_admin
       FROM sessions s
       JOIN users u ON s.user_id = u.id
@@ -27,8 +27,8 @@ export function getSessionUser(req) {
 }
 
 // GET /api/auth/me
-router.get('/me', (req, res) => {
-  const user = getSessionUser(req);
+router.get('/me', async (req, res) => {
+  const user = await getSessionUser(req);
   if (!user) {
     return res.json({ authenticated: false });
   }
@@ -36,7 +36,7 @@ router.get('/me', (req, res) => {
 });
 
 // POST /api/auth/admin-login
-router.post('/admin-login', (req, res) => {
+router.post('/admin-login', async (req, res) => {
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   // Brute-force protection: Max 5 failed attempts per 15 minutes (900,000 ms)
@@ -60,18 +60,18 @@ router.post('/admin-login', (req, res) => {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }
 
-  let user = db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE is_admin = 1 OR username = ?').get(adminUserEnv);
+  let user = await db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE is_admin = 1 OR username = ?').get(adminUserEnv);
   const newHash = bcrypt.hashSync(adminPassEnv, 10);
 
   if (!user) {
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
       VALUES (?, 'Admin', 'User', 1, ?, '127.0.0.1')
     `).run(adminUserEnv, newHash);
     user = { id: result.lastInsertRowid, username: adminUserEnv, is_admin: 1, password_hash: newHash };
   } else {
     // Always force update DB record to ensure old passwords in DB are overwritten with current env credentials
-    db.prepare('UPDATE users SET username = ?, is_admin = 1, password_hash = ? WHERE id = ?').run(adminUserEnv, newHash, user.id);
+    await db.prepare('UPDATE users SET username = ?, is_admin = 1, password_hash = ? WHERE id = ?').run(adminUserEnv, newHash, user.id);
     user.username = adminUserEnv;
     user.is_admin = 1;
     user.password_hash = newHash;
@@ -86,7 +86,7 @@ router.post('/admin-login', (req, res) => {
   const sessionToken = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO sessions (token, user_id, expires_at)
     VALUES (?, ?, ?)
   `).run(sessionToken, user.id, expiresAt);
@@ -106,10 +106,10 @@ router.post('/admin-login', (req, res) => {
 });
 
 // POST /api/auth/logout
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
   const token = req.cookies?.ithink_session;
   if (token) {
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    await db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   }
   res.clearCookie('ithink_session', { httpOnly: true, sameSite: 'lax', path: '/' });
   return res.json({ success: true });

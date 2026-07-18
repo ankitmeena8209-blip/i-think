@@ -142,7 +142,7 @@ ${message}`;
  */
 export async function retryPendingTelegramMessages() {
   try {
-    const pendingMessages = db.prepare(`
+    const pendingMessages = await db.prepare(`
       SELECT * FROM contact_messages 
       WHERE delivered_to_telegram = 0 
       ORDER BY created_at ASC 
@@ -162,7 +162,7 @@ export async function retryPendingTelegramMessages() {
       });
 
       if (result.success) {
-        db.prepare(`
+        await db.prepare(`
           UPDATE contact_messages 
           SET delivered_to_telegram = 1, status = 'delivered' 
           WHERE id = ?

@@ -1,12 +1,11 @@
 import db from '../db/schema.js';
 
 /**
- * Formats and sends a contact message notification to Telegram with full step-by-step auditing.
+ * Formats and sends a contact message notification to Telegram with detailed error diagnostics.
  */
 export async function sendTelegramContactNotification({ username, userId, serverTime, message, userAgent, ipAddress }) {
   console.log('\n--- [TELEGRAM BOT API AUDIT START] ---');
 
-  // Step 2: Verify TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from process.env
   const rawToken = process.env.TELEGRAM_BOT_TOKEN;
   const rawChatId = process.env.TELEGRAM_CHAT_ID;
 
@@ -21,7 +20,7 @@ export async function sendTelegramContactNotification({ username, userId, server
     return { success: false, error: errText };
   }
 
-  // Token & Chat ID Sanitization
+  // Clean bot token: handle cases where user included "bot" prefix or extra spaces
   let cleanToken = rawToken.trim();
   if (cleanToken.toLowerCase().startsWith('bot')) {
     cleanToken = cleanToken.substring(3);
@@ -49,7 +48,7 @@ ${userAgent || 'Unknown Browser'}
 ${ipAddress || 'Unknown IP'}`;
 
   const apiUrl = `https://api.telegram.org/bot${cleanToken}/sendMessage`;
-  console.log('[Audit 2] Sending Telegram HTTP POST request to:', `https://api.telegram.org/bot${cleanToken.substring(0, 6)}.../sendMessage`);
+  console.log('[Audit 2] Sending HTTP POST request to Telegram API...');
 
   try {
     const response = await fetch(apiUrl, {
@@ -62,7 +61,7 @@ ${ipAddress || 'Unknown IP'}`;
     });
 
     const data = await response.json();
-    console.log(`[Audit 3] Telegram API HTTP Status: ${response.status} ${response.statusText}`);
+    console.log(`[Audit 3] Telegram API Status: ${response.status} ${response.statusText}`);
     console.log('[Audit 4] Telegram API Response Payload:', JSON.stringify(data, null, 2));
 
     if (response.ok && data.ok) {
@@ -70,13 +69,17 @@ ${ipAddress || 'Unknown IP'}`;
       console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
       return { success: true, response: data };
     } else {
-      const errMsg = `Telegram API Error (${data.error_code || response.status}): ${data.description || 'Failed to deliver message to Telegram'}`;
+      let desc = data.description || 'Failed to deliver message to Telegram';
+      if (desc.includes('chat not found') || desc.includes('bot was blocked')) {
+        desc += ' (Please make sure you have sent /start to your Telegram Bot on Telegram!)';
+      }
+      const errMsg = `Telegram Error (${data.error_code || response.status}): ${desc}`;
       console.error('❌ [Telegram Audit Failure]:', errMsg);
       console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
       return { success: false, error: errMsg };
     }
   } catch (err) {
-    const fetchErr = `Telegram Network Request Exception: ${err.message || err}`;
+    const fetchErr = `Telegram Network Exception: ${err.message || err}`;
     console.error('❌ [Telegram Audit Exception]:', fetchErr);
     console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
     return { success: false, error: fetchErr };

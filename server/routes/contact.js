@@ -93,21 +93,19 @@ router.post('/', async (req, res) => {
       success: true,
       delivered: true,
       messageId,
-      responseMessage: 'Your message has been sent successfully.'
+      responseMessage: 'Your message has been sent successfully to Telegram.'
     });
   } else {
     // Log exact Telegram diagnostic error in server logs
-    console.warn('⚠️ [CONTACT FLOW STEP 4 QUEUED] Telegram delivery pending/failed:', telegramRes.error);
+    console.warn('⚠️ [CONTACT FLOW STEP 4 FAILED] Telegram delivery failed:', telegramRes.error);
     console.log('==================================================\n');
 
-    // Schedule background retry attempt
-    setTimeout(() => retryPendingTelegramMessages(), 5000);
-
-    return res.json({
-      success: true,
+    // Return the exact Telegram diagnostic error to the client
+    return res.status(400).json({
+      success: false,
       delivered: false,
       messageId,
-      responseMessage: 'Your message has been received and will be delivered shortly.'
+      error: telegramRes.error || 'Failed to deliver message to Telegram.'
     });
   }
 });

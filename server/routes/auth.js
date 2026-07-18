@@ -65,7 +65,6 @@ router.post('/admin-login', (req, res) => {
   }
 
   let user = db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE is_admin = 1 OR username = ?').get(adminUserEnv);
-
   const newHash = bcrypt.hashSync(adminPassEnv, 10);
 
   if (!user) {
@@ -74,7 +73,8 @@ router.post('/admin-login', (req, res) => {
       VALUES (?, 'Admin', 'User', 1, ?, '127.0.0.1')
     `).run(adminUserEnv, newHash);
     user = { id: result.lastInsertRowid, username: adminUserEnv, is_admin: 1, password_hash: newHash };
-  } else if (user.username !== adminUserEnv || !user.password_hash || !user.is_admin) {
+  } else {
+    // Always force update DB record to ensure old passwords in DB are overwritten with current env credentials
     db.prepare('UPDATE users SET username = ?, is_admin = 1, password_hash = ? WHERE id = ?').run(adminUserEnv, newHash, user.id);
     user.username = adminUserEnv;
     user.is_admin = 1;

@@ -19,6 +19,167 @@ function requireAdmin(req, res, next) {
 // Apply requireAdmin to ALL /api/admin/* endpoints
 router.use(requireAdmin);
 
+// GET /api/admin/stats
+router.get('/stats', (req, res) => {
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_admin = 0').get().count;
+  const thoughtCount = db.prepare('SELECT COUNT(*) as count FROM thoughts').get().count;
+  const contactCount = db.prepare('SELECT COUNT(*) as count FROM contact_messages').get().count;
+  
+  // Messages today
+  const messagesToday = db.prepare(`
+    SELECT COUNT(*) as count FROM contact_messages 
+    WHERE date(created_at) = date('now')
+  `).get().count;
+
+  // Active users (posted thoughts or created identity in last 7 days)
+  const activeUsers = db.prepare(`
+    SELECT COUNT(DISTINCT user_id) as count FROM thoughts 
+    WHERE created_at > datetime('now', '-7 days')
+  `).get().count;
+
+  return res.json({
+    userCount,
+    thoughtCount,
+    contactCount,
+    messagesToday,
+    activeUsers
+  });
+});
+
+// GET /api/admin/users (Users Search & Listing)
+router.get('/users', (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+  let query = `
+    SELECT u.id, u.username, u.word1, u.word2, u.is_admin, u.created_at, u.ip_address,
+           COUNT(t.id) as thought_count,
+           MAX(t.created_at) as last_active
+    FROM users u
+    LEFT JOIN thoughts t ON u.id = t.user_id
+    WHERE u.is_admin = 0
+  `;
+  const params = [];
+
+  if (search) {
+    query += ' AND (u.username LIKE ? OR CAST(u.id AS TEXT) LIKE ? OR ("usr_" || CAST(u.id AS TEXT)) LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  query += ' GROUP BY u.id ORDER BY u.created_at DESC LIMIT 100';
+
+  const users = db.prepare(query).all(...params);
+  return res.json({ users });
+});
+
+// DELETE /api/admin/users/:id (Permanently delete user + all thoughts & sessions)
+router.delete('/users/:id', (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!userId) return res.status(400).json({ error: 'Invalid user ID.' });
+
+  const targetUser = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
+  if (!targetUser) return res.status(404).json({ error: 'User not found.' });
+  if (targetUser.is_admin) {
+    return res.status(403).json({ error: 'Cannot delete administrator account.' });
+  }
+
+  // Delete associated thoughts & sessions first
+  db.prepare('DELETE FROM thoughts WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+
+  return res.json({ success: true, message: 'User and all associated data permanently deleted.' });
+});
+
+// DELETE /api/admin/users/:id/thoughts (Delete all thoughts for a specific user)
+router.delete('/users/:id/thoughts', (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!userId) return res.status(400).json({ error: 'Invalid user ID.' });
+
+  const result = db.prepare('DELETE FROM thoughts WHERE user_id = ?').run(userId);
+  return res.json({ success: true, message: `Deleted ${result.changes} thoughts for this user.` });
+});
+
+// GET /api/admin/thoughts (Thoughts Search & Listing)
+router.get('/thoughts', (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+  let query = 'SELECT id, user_id, username, content, created_at, ip_address FROM thoughts';
+  const params = [];
+
+  if (search) {
+    query += ' WHERE (username LIKE ? OR content LIKE ? OR CAST(user_id AS TEXT) LIKE ? OR ("usr_" || CAST(user_id AS TEXT)) LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  query += ' ORDER BY created_at DESC LIMIT 100';
+
+  const thoughts = db.prepare(query).all(...params);
+  return res.json({ thoughts });
+});
+
+// DELETE /api/admin/thoughts/:id (Delete single thought)
+router.delete('/thoughts/:id', (req, res) => {
+  const thoughtId = parseInt(req.params.id, 10);
+  if (!thoughtId) return res.status(400).json({ error: 'Invalid thought ID.' });
+
+  const result = db.prepare('DELETE FROM thoughts WHERE id = ?').run(thoughtId);
+  if (result.changes === 0) return res.status(404).json({ error: 'Thought not found.' });
+
+  return res.json({ success: true, message: 'Thought deleted successfully.' });
+});
+
+// POST /api/admin/thoughts/bulk-delete (Bulk delete thoughts)
+router.post('/thoughts/bulk-delete', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'No thought IDs provided.' });
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const stmt = db.prepare(`DELETE FROM thoughts WHERE id IN (${placeholders})`);
+  const result = stmt.run(...ids);
+
+  return res.json({ success: true, message: `Bulk deleted ${result.changes} thoughts.` });
+});
+
+// GET /api/admin/contact-messages (Messages Search & Listing)
+router.get('/contact-messages', (req, res) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+  let query = 'SELECT id, user_id, username, message, status, delivered_to_telegram, user_agent, ip_address, created_at FROM contact_messages';
+  const params = [];
+
+  if (search) {
+    query += ' WHERE (username LIKE ? OR CAST(user_id AS TEXT) LIKE ? OR ("usr_" || CAST(user_id AS TEXT)) LIKE ? OR message LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  query += ' ORDER BY created_at DESC LIMIT 100';
+
+  const messages = db.prepare(query).all(...params);
+  return res.json({ messages });
+});
+
+// PATCH /api/admin/contact-messages/:id/resolve (Mark as resolved)
+router.patch('/contact-messages/:id/resolve', (req, res) => {
+  const msgId = parseInt(req.params.id, 10);
+  if (!msgId) return res.status(400).json({ error: 'Invalid message ID.' });
+
+  db.prepare(`UPDATE contact_messages SET status = 'resolved' WHERE id = ?`).run(msgId);
+  return res.json({ success: true, message: 'Message marked as resolved.' });
+});
+
+// DELETE /api/admin/contact-messages/:id
+router.delete('/contact-messages/:id', (req, res) => {
+  const msgId = parseInt(req.params.id, 10);
+  if (!msgId) return res.status(400).json({ error: 'Invalid message ID.' });
+
+  const result = db.prepare('DELETE FROM contact_messages WHERE id = ?').run(msgId);
+  if (result.changes === 0) return res.status(404).json({ error: 'Message not found.' });
+
+  return res.json({ success: true, message: 'Contact message deleted permanently.' });
+});
+
 // POST /api/admin/change-password
 router.post('/change-password', (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
@@ -68,87 +229,6 @@ router.post('/change-password', (req, res) => {
   });
 
   return res.json({ success: true, message: 'Password updated successfully.' });
-});
-
-// GET /api/admin/stats
-router.get('/stats', (req, res) => {
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_admin = 0').get().count;
-  const thoughtCount = db.prepare('SELECT COUNT(*) as count FROM thoughts').get().count;
-  const contactCount = db.prepare('SELECT COUNT(*) as count FROM contact_messages').get().count;
-  return res.json({ userCount, thoughtCount, contactCount });
-});
-
-// GET /api/admin/users (Users Search & Listing - Separate from Messages)
-router.get('/users', (req, res) => {
-  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-
-  let query = 'SELECT id, username, word1, word2, is_admin, created_at, ip_address FROM users WHERE is_admin = 0';
-  const params = [];
-
-  if (search) {
-    query += ' AND (username LIKE ? OR CAST(id AS TEXT) LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`);
-  }
-
-  query += ' ORDER BY created_at DESC LIMIT 100';
-
-  const users = db.prepare(query).all(...params);
-  return res.json({ users });
-});
-
-// DELETE /api/admin/users/:id
-router.delete('/users/:id', (req, res) => {
-  const userId = parseInt(req.params.id, 10);
-  if (!userId) return res.status(400).json({ error: 'Invalid user ID.' });
-
-  // Prevent deleting admin users
-  const targetUser = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
-  if (targetUser && targetUser.is_admin) {
-    return res.status(403).json({ error: 'Cannot delete administrator account.' });
-  }
-
-  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-  return res.json({ success: true, message: 'User deleted permanently.' });
-});
-
-// GET /api/admin/contact-messages (Messages Search & Listing - Separate from Users)
-router.get('/contact-messages', (req, res) => {
-  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-
-  let query = 'SELECT id, user_id, username, message, status, delivered_to_telegram, user_agent, ip_address, created_at FROM contact_messages';
-  const params = [];
-
-  if (search) {
-    query += ' WHERE (username LIKE ? OR CAST(user_id AS TEXT) LIKE ? OR message LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-  }
-
-  query += ' ORDER BY created_at DESC LIMIT 100';
-
-  const messages = db.prepare(query).all(...params);
-  return res.json({ messages });
-});
-
-// DELETE /api/admin/contact-messages/:id
-router.delete('/contact-messages/:id', (req, res) => {
-  const msgId = parseInt(req.params.id, 10);
-  if (!msgId) return res.status(400).json({ error: 'Invalid message ID.' });
-
-  const result = db.prepare('DELETE FROM contact_messages WHERE id = ?').run(msgId);
-  if (result.changes === 0) {
-    return res.status(404).json({ error: 'Message not found.' });
-  }
-
-  return res.json({ success: true, message: 'Contact message deleted permanently.' });
-});
-
-// DELETE /api/admin/thoughts/:id
-router.delete('/thoughts/:id', (req, res) => {
-  const thoughtId = parseInt(req.params.id, 10);
-  if (!thoughtId) return res.status(400).json({ error: 'Invalid thought ID.' });
-
-  db.prepare('DELETE FROM thoughts WHERE id = ?').run(thoughtId);
-  return res.json({ success: true, message: 'Thought deleted successfully.' });
 });
 
 export default router;

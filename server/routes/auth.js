@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import db from '../db/schema.js';
+import { checkRateLimit } from '../utils/moderation.js';
 
 const router = express.Router();
 
@@ -36,6 +37,16 @@ router.get('/me', (req, res) => {
 
 // POST /api/auth/admin-login
 router.post('/admin-login', (req, res) => {
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+
+  // Brute-force protection: Max 5 failed attempts per 15 minutes (900,000 ms)
+  const rateLimit = checkRateLimit(`admin_login_ip_${clientIp}`, 5, 15 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return res.status(429).json({
+      error: `Too many failed login attempts. Please wait ${rateLimit.waitSeconds} seconds before trying again.`
+    });
+  }
+
   const { username, password } = req.body || {};
 
   if (!username || !password) {

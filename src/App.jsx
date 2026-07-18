@@ -153,6 +153,7 @@ export default function App() {
           <AdminDashboard
             user={user}
             onNavigate={(page) => setActivePage(page)}
+            onLogout={handleLogout}
           />
         )}
       </div>

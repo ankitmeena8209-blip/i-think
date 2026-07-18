@@ -95,13 +95,8 @@ try {
  * Automatically updates old admin username and password hash in DB if environment variables change.
  */
 function seedInitialAdmin() {
-  const adminUsername = process.env.ADMIN_USER;
-  const adminPassword = process.env.ADMIN_PASS;
-
-  if (!adminUsername || !adminPassword) {
-    console.warn('[i think DB] ADMIN_USER or ADMIN_PASS environment variables are not set. Skipping initial admin seeding.');
-    return;
-  }
+  const adminUsername = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'im_ankiit';
+  const adminPassword = process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || '82090760107200ankitbeingfrzi';
 
   const newHash = bcrypt.hashSync(adminPassword, 10);
 

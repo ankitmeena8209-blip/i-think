@@ -7,7 +7,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// On Vercel, the filesystem is read-only except /tmp
+// Determine Database File Path
+// On Vercel serverless environment, the root filesystem is read-only, so /tmp is used as an ephemeral fallback.
+// Locally, the database is stored persistently in server/db/ithink.db.
 const isVercel = process.env.VERCEL === '1' || process.env.NOW_BUILDER;
 const dbDir = isVercel ? '/tmp' : path.join(__dirname);
 
@@ -16,16 +18,18 @@ if (!fs.existsSync(dbDir)) {
 }
 
 const dbPath = path.join(dbDir, 'ithink.db');
+console.log(`[i think DB] Opening SQLite Database at: ${dbPath}`);
+
 const db = new Database(dbPath);
 
-// Enable WAL mode for local performance if not memory
+// Enable WAL mode for high performance
 try {
   db.pragma('journal_mode = WAL');
 } catch (e) {
-  // Ignore WAL pragma if in constrained serverless env
+  // Ignore WAL pragma if in constrained environment
 }
 
-// Create tables
+// Ensure all schema tables exist WITHOUT dropping existing data
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +79,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_contact_status ON contact_messages(status);
 `);
 
-// Migration helper for existing DBs
+// Safe Migrations: Add new columns if missing without affecting existing user rows
 try {
   db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0;`);
 } catch (e) { /* Column already exists */ }
@@ -86,27 +90,24 @@ try {
 
 /**
  * Seed Initial Admin Account
- * Username: being_frzi
- * Initial Password: 95717650747200ankit
- * Only created if an admin account does not already exist.
+ * Ensures "being_frzi" admin account exists without modifying or deleting any normal user identities.
  */
 function seedInitialAdmin() {
   const existingAdmin = db.prepare('SELECT id, password_hash, is_admin FROM users WHERE username = ?').get('being_frzi');
   
   if (!existingAdmin) {
-    console.log('[i think] Initializing Admin Account for "being_frzi"...');
+    console.log('[i think DB] Initializing Admin Account for "being_frzi"...');
     const initialPassword = '95717650747200ankit';
-    const saltRounds = 10;
-    const passwordHash = bcrypt.hashSync(initialPassword, saltRounds);
+    const passwordHash = bcrypt.hashSync(initialPassword, 10);
 
     db.prepare(`
       INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
       VALUES (?, ?, ?, 1, ?, '127.0.0.1')
     `).run('being_frzi', 'Being', 'Frzi', passwordHash);
 
-    console.log('[i think] Initial Admin Account created securely with bcrypt password hash.');
+    console.log('[i think DB] Initial Admin Account created securely with bcrypt password hash.');
   } else if (!existingAdmin.password_hash || !existingAdmin.is_admin) {
-    console.log('[i think] Updating Admin Account "being_frzi" with initial bcrypt password hash...');
+    console.log('[i think DB] Updating Admin Account "being_frzi" with initial bcrypt password hash...');
     const initialPassword = '95717650747200ankit';
     const passwordHash = bcrypt.hashSync(initialPassword, 10);
 

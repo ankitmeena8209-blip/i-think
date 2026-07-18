@@ -1,19 +1,31 @@
 import db from '../db/schema.js';
 
 /**
- * Formats and sends a contact message notification to Telegram.
+ * Formats and sends a contact message notification to Telegram with full step-by-step auditing.
  */
 export async function sendTelegramContactNotification({ username, userId, serverTime, message, userAgent, ipAddress }) {
+  console.log('\n--- [TELEGRAM BOT API AUDIT START] ---');
+
+  // Step 2: Verify TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from process.env
   const rawToken = process.env.TELEGRAM_BOT_TOKEN;
   const rawChatId = process.env.TELEGRAM_CHAT_ID;
 
+  console.log('[Audit 1] Checking Environment Variables:');
+  console.log('  - TELEGRAM_BOT_TOKEN present:', Boolean(rawToken));
+  console.log('  - TELEGRAM_CHAT_ID present:', Boolean(rawChatId));
+
   if (!rawToken || !rawChatId) {
-    console.warn('[Telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variable is missing.');
-    return { success: false, error: 'Telegram environment credentials missing' };
+    const errText = 'Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables.';
+    console.error('❌ [Telegram Audit Error]:', errText);
+    console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
+    return { success: false, error: errText };
   }
 
-  // Sanitize token formatting if prefix 'bot' was included
-  const cleanToken = rawToken.trim().replace(/^bot/i, '');
+  // Token & Chat ID Sanitization
+  let cleanToken = rawToken.trim();
+  if (cleanToken.toLowerCase().startsWith('bot')) {
+    cleanToken = cleanToken.substring(3);
+  }
   const cleanChatId = rawChatId.trim();
 
   const telegramText = `📩 New Contact Message
@@ -36,9 +48,11 @@ ${userAgent || 'Unknown Browser'}
 📍 IP:
 ${ipAddress || 'Unknown IP'}`;
 
+  const apiUrl = `https://api.telegram.org/bot${cleanToken}/sendMessage`;
+  console.log('[Audit 2] Sending Telegram HTTP POST request to:', `https://api.telegram.org/bot${cleanToken.substring(0, 6)}.../sendMessage`);
+
   try {
-    const url = `https://api.telegram.org/bot${cleanToken}/sendMessage`;
-    const response = await fetch(url, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -48,17 +62,24 @@ ${ipAddress || 'Unknown IP'}`;
     });
 
     const data = await response.json();
+    console.log(`[Audit 3] Telegram API HTTP Status: ${response.status} ${response.statusText}`);
+    console.log('[Audit 4] Telegram API Response Payload:', JSON.stringify(data, null, 2));
 
     if (response.ok && data.ok) {
-      console.log('[Telegram] Message successfully sent to Telegram Chat ID:', cleanChatId);
-      return { success: true };
+      console.log('✅ [Telegram Audit Success] Notification delivered to Telegram Chat ID:', cleanChatId);
+      console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
+      return { success: true, response: data };
     } else {
-      console.error('[Telegram] API error response:', data);
-      return { success: false, error: data.description || 'Telegram API returned failure' };
+      const errMsg = `Telegram API Error (${data.error_code || response.status}): ${data.description || 'Failed to deliver message to Telegram'}`;
+      console.error('❌ [Telegram Audit Failure]:', errMsg);
+      console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
+      return { success: false, error: errMsg };
     }
   } catch (err) {
-    console.error('[Telegram] Network connection error:', err);
-    return { success: false, error: err.message || 'Telegram network request failed' };
+    const fetchErr = `Telegram Network Request Exception: ${err.message || err}`;
+    console.error('❌ [Telegram Audit Exception]:', fetchErr);
+    console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
+    return { success: false, error: fetchErr };
   }
 }
 
@@ -75,7 +96,7 @@ export async function retryPendingTelegramMessages() {
       SELECT * FROM contact_messages 
       WHERE delivered_to_telegram = 0 
       ORDER BY created_at ASC 
-      LIMIT 10
+      LIMIT 5
     `).all();
 
     for (const msg of pendingMessages) {
@@ -94,10 +115,10 @@ export async function retryPendingTelegramMessages() {
           SET delivered_to_telegram = 1, status = 'delivered' 
           WHERE id = ?
         `).run(msg.id);
-        console.log(`[Telegram] Successfully delivered retried message ID #${msg.id}`);
+        console.log(`[Telegram Retry] Successfully delivered message ID #${msg.id}`);
       }
     }
   } catch (err) {
-    console.error('[Telegram Retry] Error processing pending queue:', err);
+    console.error('[Telegram Retry Error]:', err);
   }
 }

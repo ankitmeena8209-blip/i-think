@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+dotenv.config();
+dotenv.config({ path: '.env.local' });
+
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -49,6 +53,8 @@ if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'test') {
   function startServer(port) {
     const server = app.listen(port, () => {
       console.log(`\n[i think] Server is live and listening on http://localhost:${port}`);
+      console.log(`[i think] TELEGRAM_BOT_TOKEN set: ${Boolean(process.env.TELEGRAM_BOT_TOKEN)}`);
+      console.log(`[i think] TELEGRAM_CHAT_ID set: ${Boolean(process.env.TELEGRAM_CHAT_ID)}`);
     });
 
     server.on('error', (err) => {

@@ -2,7 +2,7 @@ import express from 'express';
 import db from '../db/schema.js';
 import { getSessionUser } from './auth.js';
 import { checkRateLimit } from '../utils/moderation.js';
-import { sendTelegramContactNotification, retryPendingTelegramMessages } from '../utils/telegram.js';
+import { sendTelegramContactNotification } from '../utils/telegram.js';
 
 const router = express.Router();
 
@@ -12,11 +12,17 @@ router.post('/', async (req, res) => {
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
   const userAgent = req.headers['user-agent'] || 'Unknown Browser';
 
+  console.log('\n==================================================');
+  console.log('📩 [CONTACT FLOW STEP 1] Form submission received');
+  console.log('   User:', user ? `${user.username} (ID: ${user.id})` : 'Anonymous');
+  console.log('   IP:', clientIp);
+
   // 1. Rate Limiting: Max 5 messages per 10 minutes (600,000 ms)
   const identifier = user ? `contact_user_${user.id}` : `contact_ip_${clientIp}`;
   const rateLimit = checkRateLimit(identifier, 5, 10 * 60 * 1000);
 
   if (!rateLimit.allowed) {
+    console.warn('⚠️ [CONTACT FLOW STEP 1 FAIL] Rate limit exceeded');
     return res.status(429).json({
       error: `Too many contact requests. Please wait ${rateLimit.waitSeconds} seconds before sending another message.`
     });
@@ -47,6 +53,7 @@ router.post('/', async (req, res) => {
   `).get(userId || -1, clientIp, trimmedMessage);
 
   if (duplicate) {
+    console.warn('⚠️ [CONTACT FLOW STEP 2 FAIL] Duplicate message prevented');
     return res.status(400).json({ error: 'You have already sent this exact message recently.' });
   }
 
@@ -58,8 +65,10 @@ router.post('/', async (req, res) => {
 
   const messageId = result.lastInsertRowid;
   const serverTime = new Date().toLocaleString();
+  console.log(`💾 [CONTACT FLOW STEP 2] Database saved successfully (Message ID: #${messageId})`);
 
-  // 5. Send to Telegram
+  // 5. Send to Telegram API
+  console.log('🚀 [CONTACT FLOW STEP 3] Sending request to Telegram Bot API...');
   const telegramRes = await sendTelegramContactNotification({
     username,
     userId,
@@ -77,6 +86,9 @@ router.post('/', async (req, res) => {
       WHERE id = ?
     `).run(messageId);
 
+    console.log('✅ [CONTACT FLOW STEP 4 SUCCESS] Telegram message delivered & DB status updated');
+    console.log('==================================================\n');
+
     return res.json({
       success: true,
       delivered: true,
@@ -84,14 +96,15 @@ router.post('/', async (req, res) => {
       responseMessage: 'Your message has been sent successfully.'
     });
   } else {
-    // Schedule background retry attempt
-    setTimeout(() => retryPendingTelegramMessages(), 5000);
+    // Log Telegram Failure & Return exact error to client
+    console.error('❌ [CONTACT FLOW STEP 4 FAILURE] Telegram API failed:', telegramRes.error);
+    console.log('==================================================\n');
 
-    return res.json({
-      success: true,
+    return res.status(500).json({
+      success: false,
       delivered: false,
       messageId,
-      responseMessage: 'Your message has been received and will be delivered shortly.'
+      error: telegramRes.error || 'Telegram delivery failed.'
     });
   }
 });

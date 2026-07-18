@@ -1,37 +1,68 @@
 import 'dotenv/config';
 import db from '../db/schema.js';
 
+// Backend Fallback Bot Token (Kept strictly on the server)
+const HARDCODED_BOT_TOKEN = '8993080619:AAHdX1Z-Bl5IyMX_OLRD5GXcRu7cKCGknpg';
+
 /**
- * Formats and sends a contact message notification to Telegram with detailed error diagnostics.
+ * Formats and sends a contact message notification to Telegram with auto-discovery fallback.
  */
 export async function sendTelegramContactNotification({ username, userId, serverTime, message, userAgent, ipAddress }) {
   console.log('\n--- [TELEGRAM BOT API AUDIT START] ---');
 
-  // Support multiple common environment variable naming conventions
-  const rawToken = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
-  const rawChatId = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHATID || process.env.CHAT_ID;
+  // 1. Resolve Token
+  const rawToken = process.env.TELEGRAM_BOT_TOKEN || 
+                   process.env.TELEGRAM_TOKEN || 
+                   process.env.BOT_TOKEN || 
+                   HARDCODED_BOT_TOKEN;
 
-  console.log('[Audit 1] Checking Environment Variables:');
-  console.log('  - TELEGRAM_BOT_TOKEN / TELEGRAM_TOKEN / BOT_TOKEN present:', Boolean(rawToken));
-  console.log('  - TELEGRAM_CHAT_ID / TELEGRAM_CHATID / CHAT_ID present:', Boolean(rawChatId));
+  let cleanToken = rawToken.trim();
+  if (cleanToken.toLowerCase().startsWith('bot')) {
+    cleanToken = cleanToken.substring(3);
+  }
 
-  if (!rawToken || !rawChatId) {
-    const missingVars = [];
-    if (!rawToken) missingVars.push('TELEGRAM_BOT_TOKEN');
-    if (!rawChatId) missingVars.push('TELEGRAM_CHAT_ID');
-    
-    const errText = `Missing ${missingVars.join(' and ')} in environment variables.`;
+  // 2. Resolve Chat ID
+  let rawChatId = process.env.TELEGRAM_CHAT_ID || 
+                  process.env.TELEGRAM_CHATID || 
+                  process.env.CHAT_ID;
+
+  // Auto-discover Chat ID from Telegram getUpdates if not explicitly set in env
+  if (!rawChatId) {
+    console.log('[Audit 1.5] TELEGRAM_CHAT_ID not in env. Attempting auto-discovery via getUpdates...');
+    try {
+      const updatesUrl = `https://api.telegram.org/bot${cleanToken}/getUpdates`;
+      const updatesRes = await fetch(updatesUrl);
+      const updatesData = await updatesRes.json();
+
+      if (updatesData.ok && Array.isArray(updatesData.result) && updatesData.result.length > 0) {
+        // Find newest message with chat id
+        for (let i = updatesData.result.length - 1; i >= 0; i--) {
+          const update = updatesData.result[i];
+          const chatId = update.message?.chat?.id || update.channel_post?.chat?.id || update.my_chat_member?.chat?.id;
+          if (chatId) {
+            rawChatId = String(chatId);
+            console.log(`✅ [Audit Auto-Discovery Success] Discovered Chat ID: ${rawChatId}`);
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Audit Auto-Discovery Failed]:', err.message);
+    }
+  }
+
+  console.log('[Audit 1] Checking Environment Credentials:');
+  console.log('  - Token configured:', Boolean(cleanToken));
+  console.log('  - Chat ID configured/discovered:', Boolean(rawChatId), rawChatId ? `(ID: ${rawChatId})` : '');
+
+  if (!rawChatId) {
+    const errText = 'Missing TELEGRAM_CHAT_ID. Please open your bot on Telegram and send /start so it can discover your Chat ID!';
     console.error('❌ [Telegram Audit Error]:', errText);
     console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
     return { success: false, error: errText };
   }
 
-  // Clean bot token: handle cases where user included "bot" prefix or extra spaces
-  let cleanToken = rawToken.trim();
-  if (cleanToken.toLowerCase().startsWith('bot')) {
-    cleanToken = cleanToken.substring(3);
-  }
-  const cleanChatId = rawChatId.trim();
+  const cleanChatId = String(rawChatId).trim();
 
   const telegramText = `📩 New Contact Message
 
@@ -77,7 +108,7 @@ ${ipAddress || 'Unknown IP'}`;
     } else {
       let desc = data.description || 'Failed to deliver message to Telegram';
       if (desc.includes('chat not found') || desc.includes('bot was blocked')) {
-        desc += ' (Please make sure you have sent /start to your Telegram Bot on Telegram!)';
+        desc += ' (Please open your bot on Telegram and press /start!)';
       }
       const errMsg = `Telegram Error (${data.error_code || response.status}): ${desc}`;
       console.error('❌ [Telegram Audit Failure]:', errMsg);
@@ -96,10 +127,6 @@ ${ipAddress || 'Unknown IP'}`;
  * Background routine to retry delivering pending messages to Telegram.
  */
 export async function retryPendingTelegramMessages() {
-  const rawToken = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
-  const rawChatId = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHATID || process.env.CHAT_ID;
-  if (!rawToken || !rawChatId) return;
-
   try {
     const pendingMessages = db.prepare(`
       SELECT * FROM contact_messages 
@@ -107,6 +134,8 @@ export async function retryPendingTelegramMessages() {
       ORDER BY created_at ASC 
       LIMIT 5
     `).all();
+
+    if (pendingMessages.length === 0) return;
 
     for (const msg of pendingMessages) {
       const result = await sendTelegramContactNotification({

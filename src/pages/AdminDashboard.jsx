@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-export default function AdminDashboard({ user, onNavigate, onLogout }) {
+export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdminLogin }) {
   // Navigation Tabs: 'dashboard' | 'users' | 'thoughts' | 'messages' | 'settings'
   const [activeTab, setActiveTab] = useState('dashboard');
 
@@ -107,14 +107,18 @@ export default function AdminDashboard({ user, onNavigate, onLogout }) {
   }, []);
 
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    if (user && user.isAdmin) {
+      fetchStats();
+    }
+  }, [user, fetchStats]);
 
   useEffect(() => {
-    if (activeTab === 'users') fetchUsers(usersSearch);
-    if (activeTab === 'thoughts') fetchThoughts(thoughtsSearch);
-    if (activeTab === 'messages') fetchMessages(messagesSearch);
-  }, [activeTab, usersSearch, thoughtsSearch, messagesSearch, fetchUsers, fetchThoughts, fetchMessages]);
+    if (user && user.isAdmin) {
+      if (activeTab === 'users') fetchUsers(usersSearch);
+      if (activeTab === 'thoughts') fetchThoughts(thoughtsSearch);
+      if (activeTab === 'messages') fetchMessages(messagesSearch);
+    }
+  }, [user, activeTab, usersSearch, thoughtsSearch, messagesSearch, fetchUsers, fetchThoughts, fetchMessages]);
 
   // Access Control Guard
   if (!user || !user.isAdmin) {
@@ -128,12 +132,22 @@ export default function AdminDashboard({ user, onNavigate, onLogout }) {
           <p className="font-body-md text-secondary dark:text-[#A1A1A1] mb-6">
             Access restricted to authorized administrators only.
           </p>
-          <button
-            onClick={() => onNavigate('home')}
-            className="bg-primary dark:bg-white text-on-primary dark:text-black font-label-md px-6 py-2.5 rounded-[14px]"
-          >
-            Return to Feed
-          </button>
+          <div className="flex justify-center gap-3">
+            {onOpenAdminLogin && (
+              <button
+                onClick={onOpenAdminLogin}
+                className="bg-primary dark:bg-white text-on-primary dark:text-black font-label-md px-6 py-2.5 rounded-[14px] cursor-pointer"
+              >
+                Admin Sign In
+              </button>
+            )}
+            <button
+              onClick={() => onNavigate('home')}
+              className="border border-outline-variant dark:border-[#444] text-primary dark:text-white font-label-md px-6 py-2.5 rounded-[14px] cursor-pointer"
+            >
+              Feed View
+            </button>
+          </div>
         </div>
       </main>
     );
@@ -713,7 +727,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout }) {
                       {msg.status !== 'resolved' && (
                         <button
                           onClick={() => handleResolveMessage(msg.id)}
-                          className="text-blue-600 dark:text-blue-400 hover:underline font-label-sm text-xs"
+                          className="text-blue-600 dark:text-blue-400 hover:underline font-label-sm text-xs cursor-pointer"
                         >
                           Resolve
                         </button>
@@ -721,7 +735,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout }) {
 
                       <button
                         onClick={() => handleDeleteMessage(msg.id)}
-                        className="text-error hover:text-red-600 font-label-sm text-xs"
+                        className="text-error hover:text-red-600 font-label-sm text-xs cursor-pointer"
                       >
                         Delete
                       </button>

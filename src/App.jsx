@@ -70,7 +70,11 @@ export default function App() {
       }
     };
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+    };
   }, []);
 
   const handleToggleTheme = () => {
@@ -94,8 +98,19 @@ export default function App() {
       console.error('Error logging out:', err);
     } finally {
       setUser(null);
+      // Reset URL hash so typing #admin again triggers hashchange event
+      if (window.location.hash === '#admin') {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
       setActivePage('identity');
     }
+  };
+
+  const handleNavigate = (page) => {
+    if (page === 'admin' && (!user || !user.isAdmin)) {
+      setIsAdminLoginOpen(true);
+    }
+    setActivePage(page);
   };
 
   if (loadingAuth) {
@@ -110,7 +125,7 @@ export default function App() {
     <div className="min-h-screen bg-surface dark:bg-[#111111] text-on-surface dark:text-[#FAFAF8] flex flex-col font-body-md transition-colors duration-300">
       <Navbar
         activePage={activePage}
-        onNavigate={(page) => setActivePage(page)}
+        onNavigate={handleNavigate}
         user={user}
         onLogout={handleLogout}
         isDark={isDark}
@@ -133,33 +148,34 @@ export default function App() {
         )}
         {activePage === 'about' && (
           <About
-            onNavigate={(page) => setActivePage(page)}
+            onNavigate={handleNavigate}
             onOpenContact={() => setIsContactOpen(true)}
           />
         )}
         {activePage === 'rules' && (
           <Rules
-            onNavigate={(page) => setActivePage(page)}
+            onNavigate={handleNavigate}
             onOpenContact={() => setIsContactOpen(true)}
           />
         )}
         {activePage === 'privacy' && (
           <Privacy
-            onNavigate={(page) => setActivePage(page)}
+            onNavigate={handleNavigate}
             onOpenContact={() => setIsContactOpen(true)}
           />
         )}
         {activePage === 'admin' && (
           <AdminDashboard
             user={user}
-            onNavigate={(page) => setActivePage(page)}
+            onNavigate={handleNavigate}
             onLogout={handleLogout}
+            onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
           />
         )}
       </div>
 
       <Footer
-        onNavigate={(page) => setActivePage(page)}
+        onNavigate={handleNavigate}
         onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
       />
 

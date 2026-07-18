@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import db from './db/schema.js';
 import { validateWord, containsProfanity, sanitizeText } from './utils/moderation.js';
@@ -30,12 +31,17 @@ try {
 
 // 2. Admin account seeding & security tests
 try {
-  const adminUser = db.prepare('SELECT * FROM users WHERE username = ?').get('being_frzi');
-  assert(adminUser !== undefined, 'Initial Admin account "being_frzi" exists');
+  const adminUsername = process.env.ADMIN_USER;
+  const adminPassword = process.env.ADMIN_PASS;
+  assert(Boolean(adminUsername), 'ADMIN_USER environment variable is configured');
+  assert(Boolean(adminPassword), 'ADMIN_PASS environment variable is configured');
+
+  const adminUser = db.prepare('SELECT * FROM users WHERE username = ?').get(adminUsername);
+  assert(adminUser !== undefined, `Initial Admin account "${adminUsername}" exists`);
   assert(adminUser.is_admin === 1, 'Admin account has is_admin = 1');
   assert(adminUser.password_hash !== null && adminUser.password_hash.startsWith('$2'), 'Password stored only as a bcrypt hash ($2a/$2b)');
 
-  const validPasswordMatch = bcrypt.compareSync('95717650747200ankit', adminUser.password_hash);
+  const validPasswordMatch = bcrypt.compareSync(adminPassword, adminUser.password_hash);
   assert(validPasswordMatch === true, 'Admin initial password verifies correctly against bcrypt hash');
 } catch (err) {
   console.error('Admin security test error:', err);

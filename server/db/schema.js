@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
@@ -90,30 +91,36 @@ try {
 
 /**
  * Seed Initial Admin Account
- * Ensures "being_frzi" admin account exists without modifying or deleting any normal user identities.
+ * Ensures admin account configured via ADMIN_USER & ADMIN_PASS environment variables exists.
  */
 function seedInitialAdmin() {
-  const existingAdmin = db.prepare('SELECT id, password_hash, is_admin FROM users WHERE username = ?').get('being_frzi');
+  const adminUsername = process.env.ADMIN_USER;
+  const adminPassword = process.env.ADMIN_PASS;
+
+  if (!adminUsername || !adminPassword) {
+    console.warn('[i think DB] ADMIN_USER or ADMIN_PASS environment variables are not set. Skipping initial admin seeding.');
+    return;
+  }
+
+  const existingAdmin = db.prepare('SELECT id, password_hash, is_admin FROM users WHERE username = ?').get(adminUsername);
   
   if (!existingAdmin) {
-    console.log('[i think DB] Initializing Admin Account for "being_frzi"...');
-    const initialPassword = '95717650747200ankit';
-    const passwordHash = bcrypt.hashSync(initialPassword, 10);
+    console.log(`[i think DB] Initializing Admin Account for "${adminUsername}"...`);
+    const passwordHash = bcrypt.hashSync(adminPassword, 10);
 
     db.prepare(`
       INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
       VALUES (?, ?, ?, 1, ?, '127.0.0.1')
-    `).run('being_frzi', 'Being', 'Frzi', passwordHash);
+    `).run(adminUsername, 'Admin', 'User', passwordHash);
 
     console.log('[i think DB] Initial Admin Account created securely with bcrypt password hash.');
   } else if (!existingAdmin.password_hash || !existingAdmin.is_admin) {
-    console.log('[i think DB] Updating Admin Account "being_frzi" with initial bcrypt password hash...');
-    const initialPassword = '95717650747200ankit';
-    const passwordHash = bcrypt.hashSync(initialPassword, 10);
+    console.log(`[i think DB] Updating Admin Account "${adminUsername}" with initial bcrypt password hash...`);
+    const passwordHash = bcrypt.hashSync(adminPassword, 10);
 
     db.prepare(`
       UPDATE users SET is_admin = 1, password_hash = ? WHERE username = ?
-    `).run(passwordHash, 'being_frzi');
+    `).run(passwordHash, adminUsername);
   }
 }
 

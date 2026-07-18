@@ -47,19 +47,39 @@ router.post('/admin-login', (req, res) => {
     });
   }
 
+  const adminUserEnv = process.env.ADMIN_USER;
+  const adminPassEnv = process.env.ADMIN_PASS;
+
+  if (!adminUserEnv || !adminPassEnv) {
+    return res.status(500).json({ error: 'Admin credentials are not configured on the server.' });
+  }
+
   const { username, password } = req.body || {};
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required.' });
   }
 
-  const user = db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE username = ?').get(username.trim());
-
-  if (!user || !user.is_admin || !user.password_hash) {
+  if (username.trim() !== adminUserEnv) {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }
 
-  const isPasswordValid = bcrypt.compareSync(password, user.password_hash);
+  let user = db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE username = ?').get(adminUserEnv);
+
+  if (!user) {
+    const passwordHash = bcrypt.hashSync(adminPassEnv, 10);
+    const result = db.prepare(`
+      INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
+      VALUES (?, 'Admin', 'User', 1, ?, '127.0.0.1')
+    `).run(adminUserEnv, passwordHash);
+    user = { id: result.lastInsertRowid, username: adminUserEnv, is_admin: 1, password_hash: passwordHash };
+  }
+
+  if (!user.is_admin || !user.password_hash) {
+    return res.status(401).json({ error: 'Invalid admin credentials.' });
+  }
+
+  const isPasswordValid = bcrypt.compareSync(password, user.password_hash) || (password === adminPassEnv);
   if (!isPasswordValid) {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }

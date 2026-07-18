@@ -1,6 +1,4 @@
-import dotenv from 'dotenv';
-dotenv.config();
-dotenv.config({ path: '.env.local' });
+import 'dotenv/config';
 
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -52,9 +50,12 @@ if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'test') {
   
   function startServer(port) {
     const server = app.listen(port, () => {
+      const hasToken = Boolean(process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN);
+      const hasChatId = Boolean(process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHATID || process.env.CHAT_ID);
+
       console.log(`\n[i think] Server is live and listening on http://localhost:${port}`);
-      console.log(`[i think] TELEGRAM_BOT_TOKEN set: ${Boolean(process.env.TELEGRAM_BOT_TOKEN)}`);
-      console.log(`[i think] TELEGRAM_CHAT_ID set: ${Boolean(process.env.TELEGRAM_CHAT_ID)}`);
+      console.log(`[i think] Telegram Bot Token loaded: ${hasToken}`);
+      console.log(`[i think] Telegram Chat ID loaded: ${hasChatId}`);
     });
 
     server.on('error', (err) => {

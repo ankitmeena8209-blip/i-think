@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import db from '../db/schema.js';
 
 /**
@@ -6,15 +7,20 @@ import db from '../db/schema.js';
 export async function sendTelegramContactNotification({ username, userId, serverTime, message, userAgent, ipAddress }) {
   console.log('\n--- [TELEGRAM BOT API AUDIT START] ---');
 
-  const rawToken = process.env.TELEGRAM_BOT_TOKEN;
-  const rawChatId = process.env.TELEGRAM_CHAT_ID;
+  // Support multiple common environment variable naming conventions
+  const rawToken = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
+  const rawChatId = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHATID || process.env.CHAT_ID;
 
   console.log('[Audit 1] Checking Environment Variables:');
-  console.log('  - TELEGRAM_BOT_TOKEN present:', Boolean(rawToken));
-  console.log('  - TELEGRAM_CHAT_ID present:', Boolean(rawChatId));
+  console.log('  - TELEGRAM_BOT_TOKEN / TELEGRAM_TOKEN / BOT_TOKEN present:', Boolean(rawToken));
+  console.log('  - TELEGRAM_CHAT_ID / TELEGRAM_CHATID / CHAT_ID present:', Boolean(rawChatId));
 
   if (!rawToken || !rawChatId) {
-    const errText = 'Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables.';
+    const missingVars = [];
+    if (!rawToken) missingVars.push('TELEGRAM_BOT_TOKEN');
+    if (!rawChatId) missingVars.push('TELEGRAM_CHAT_ID');
+    
+    const errText = `Missing ${missingVars.join(' and ')} in environment variables.`;
     console.error('❌ [Telegram Audit Error]:', errText);
     console.log('--- [TELEGRAM BOT API AUDIT END] ---\n');
     return { success: false, error: errText };
@@ -90,8 +96,8 @@ ${ipAddress || 'Unknown IP'}`;
  * Background routine to retry delivering pending messages to Telegram.
  */
 export async function retryPendingTelegramMessages() {
-  const rawToken = process.env.TELEGRAM_BOT_TOKEN;
-  const rawChatId = process.env.TELEGRAM_CHAT_ID;
+  const rawToken = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN || process.env.BOT_TOKEN;
+  const rawChatId = process.env.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHATID || process.env.CHAT_ID;
   if (!rawToken || !rawChatId) return;
 
   try {

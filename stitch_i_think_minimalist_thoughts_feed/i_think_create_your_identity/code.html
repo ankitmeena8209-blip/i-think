@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Create Your Identity - i think</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-400-normal.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-500-normal.woff2') format('woff2');
+            font-weight: 500;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Geist';
+            src: url('https://cdn.jsdelivr.net/fontsource/fonts/geist-sans@latest/latin-600-normal.woff2') format('woff2');
+            font-weight: 600;
+            font-style: normal;
+        }
+
+        body {
+            font-family: 'Geist', sans-serif;
+            background-color: #FAFAF8; /* layer 0 */
+            color: #1a1c1b;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        /* Input animations */
+        .input-focus-border:focus-within {
+            border-color: #111111;
+        }
+
+        .preview-enter {
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.4s ease-out;
+        }
+        .preview-enter.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .pulse-status {
+            animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#f9f9f7",
+                        "secondary": "#5e5e5e",
+                        "on-primary-container": "#858383",
+                        "tertiary-fixed-dim": "#c6c6c6",
+                        "outline": "#747878",
+                        "on-secondary": "#ffffff",
+                        "surface-dim": "#dadad8",
+                        "primary-fixed-dim": "#c8c6c5",
+                        "on-surface": "#1a1c1b",
+                        "on-tertiary": "#ffffff",
+                        "surface-container": "#eeeeec",
+                        "outline-variant": "#c4c7c7",
+                        "surface-variant": "#e2e3e1",
+                        "inverse-surface": "#2f3130",
+                        "background": "#f9f9f7",
+                        "secondary-container": "#e1dfdf",
+                        "primary-container": "#1c1b1b",
+                        "primary-fixed": "#e5e2e1",
+                        "error": "#ba1a1a",
+                        "inverse-on-surface": "#f1f1ef",
+                        "on-tertiary-fixed": "#1a1c1c",
+                        "on-secondary-fixed-variant": "#464747",
+                        "on-primary-fixed-variant": "#474646",
+                        "surface-container-low": "#f4f4f2",
+                        "surface-tint": "#5f5e5e",
+                        "on-error": "#ffffff",
+                        "tertiary-fixed": "#e2e2e2",
+                        "tertiary": "#000000",
+                        "error-container": "#ffdad6",
+                        "surface-container-highest": "#e2e3e1",
+                        "on-background": "#1a1c1b",
+                        "surface-container-high": "#e8e8e6",
+                        "on-primary-fixed": "#1c1b1b",
+                        "surface-container-lowest": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "on-primary": "#ffffff",
+                        "secondary-fixed": "#e4e2e2",
+                        "on-tertiary-container": "#838484",
+                        "on-tertiary-fixed-variant": "#454747",
+                        "inverse-primary": "#c8c6c5",
+                        "secondary-fixed-dim": "#c7c6c6",
+                        "on-surface-variant": "#444748",
+                        "on-secondary-container": "#626262",
+                        "surface-bright": "#f9f9f7",
+                        "primary": "#000000",
+                        "tertiary-container": "#1a1c1c",
+                        "on-secondary-fixed": "#1b1c1c"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px",
+                        "swiss": "14px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "margin-mobile": "20px",
+                        "gutter": "24px",
+                        "container-max": "1120px",
+                        "margin-desktop": "64px"
+                    },
+                    "fontFamily": {
+                        "display": ["Geist", "sans-serif"],
+                        "body-md": ["Geist", "sans-serif"],
+                        "headline-lg": ["Geist", "sans-serif"],
+                        "headline-md": ["Geist", "sans-serif"],
+                        "body-lg": ["Geist", "sans-serif"],
+                        "label-sm": ["Geist", "sans-serif"],
+                        "label-md": ["Geist", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "display": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.04em", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "500" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "1.4", "letterSpacing": "0.04em", "fontWeight": "500" }],
+                        "label-md": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background antialiased flex flex-col min-h-screen">
+<!-- TopNavBar (Linear/Transactional intent -> suppressed nav links, kept brand anchor) -->
+<header class="w-full top-0 border-b border-outline-variant bg-background z-10 sticky">
+<div class="flex justify-between items-center h-20 px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto">
+<div class="font-display text-headline-md tracking-tight text-primary select-none">
+                i think
+            </div>
+<!-- Secondary Action Contextual for Setup -->
+<button class="font-label-md text-secondary hover:text-primary transition-colors cursor-pointer">
+                Cancel
+            </button>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="flex-grow flex flex-col items-center justify-center px-margin-mobile md:px-margin-desktop py-16 md:py-32 w-full max-w-container-max mx-auto relative z-0">
+<!-- Headers -->
+<div class="text-center max-w-2xl mb-12">
+<h1 class="font-display text-display text-primary mb-4">Create Your Identity</h1>
+<p class="font-body-lg text-secondary">
+                Choose two simple words that represent you. We'll combine them into one unique identity that others will know you by.
+            </p>
+</div>
+<!-- Interactive Bento Card -->
+<div class="w-full max-w-xl bg-surface border border-outline-variant rounded-swiss p-8 md:p-12 shadow-sm flex flex-col gap-8 relative z-10">
+<!-- Inputs Row -->
+<div class="flex flex-col md:flex-row gap-4">
+<div class="flex-1 flex flex-col gap-2">
+<label class="font-label-sm text-secondary uppercase tracking-widest" for="word1">First Word</label>
+<div class="input-focus-border border border-outline-variant rounded-swiss bg-surface transition-colors flex items-center px-4 py-3">
+<input autocomplete="off" class="w-full bg-transparent border-none p-0 focus:ring-0 font-body-lg text-primary placeholder:text-outline-variant" id="word1" maxlength="15" placeholder="e.g. Silent" type="text"/>
+</div>
+</div>
+<div class="flex-1 flex flex-col gap-2">
+<label class="font-label-sm text-secondary uppercase tracking-widest" for="word2">Second Word</label>
+<div class="input-focus-border border border-outline-variant rounded-swiss bg-surface transition-colors flex items-center px-4 py-3">
+<input autocomplete="off" class="w-full bg-transparent border-none p-0 focus:ring-0 font-body-lg text-primary placeholder:text-outline-variant" id="word2" maxlength="15" placeholder="e.g. River" type="text"/>
+</div>
+</div>
+</div>
+<!-- Divider -->
+<hr class="border-t border-outline-variant w-full"/>
+<!-- Live Preview Area -->
+<div class="flex flex-col items-center justify-center min-h-[120px] text-center gap-4">
+<label class="font-label-sm text-secondary uppercase tracking-widest">Your Identity</label>
+<div class="preview-enter active" id="preview-container">
+<h2 class="font-display text-display text-primary tracking-tight" id="identity-preview" style="word-break: break-word;">
+<span class="text-outline-variant">YourIdentity</span>
+</h2>
+</div>
+<!-- Status Indicator -->
+<div class="flex items-center gap-2 font-label-md text-secondary opacity-0 transition-opacity duration-300" id="status-indicator">
+<span class="w-2 h-2 rounded-full bg-primary pulse-status"></span>
+<span id="status-text">Available</span>
+</div>
+</div>
+<!-- Actions -->
+<div class="flex flex-col gap-3 mt-4">
+<button class="w-full bg-primary text-on-primary font-label-md py-4 rounded-swiss hover:bg-[#222222] transition-colors cursor-pointer flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled="" id="btn-continue">
+                    Continue
+                    <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+<button class="w-full bg-transparent border border-outline-variant text-primary font-label-md py-4 rounded-swiss hover:bg-surface-container-low transition-colors cursor-pointer flex justify-center items-center gap-2" id="btn-generate">
+<span class="material-symbols-outlined text-[18px]">casino</span>
+                    Generate For Me
+                </button>
+</div>
+</div>
+<!-- Contextual Info Area -->
+<div class="w-full max-w-xl mt-12 flex flex-col gap-6">
+<div class="bg-surface-container-low rounded-swiss p-6 border border-outline-variant">
+<div class="flex items-start gap-4">
+<span class="material-symbols-outlined text-secondary mt-1">info</span>
+<div class="flex flex-col gap-2">
+<p class="font-body-md text-on-background">
+                            Your username is created by combining two simple words of your choice into one unique identity. 
+                            <span class="font-bold">Example: Silent + River = SilentRiver.</span>
+</p>
+<p class="font-body-md text-secondary">
+                            This identity will be visible with every thought you publish, while your real identity always remains private.
+                        </p>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-center gap-2 text-secondary">
+<span class="material-symbols-outlined text-[16px]">lock</span>
+<p class="font-label-sm uppercase tracking-widest text-center">No real name. No email. No phone. Just your chosen identity.</p>
+</div>
+</div>
+<!-- Closing Quote -->
+<div class="mt-24 text-center">
+<p class="font-body-lg text-outline italic">"Choose a name. Share a thought. Stay yourself."</p>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full bottom-0 border-t border-outline-variant bg-background mt-auto z-10">
+<div class="flex flex-col items-center gap-unit py-16 px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto text-center">
+<div class="font-display text-headline-md text-primary">
+                i think
+            </div>
+<div class="flex gap-6 mt-4 font-body-md text-secondary">
+<a class="hover:text-primary transition-colors hover:underline" href="#">About</a>
+<a class="hover:text-primary transition-colors hover:underline" href="#">Rules</a>
+<a class="hover:text-primary transition-colors hover:underline" href="#">Privacy</a>
+<a class="hover:text-primary transition-colors hover:underline" href="#">Terms</a>
+</div>
+<p class="font-body-md text-secondary mt-6">
+                © 2024 i think. Words remain. People don't.
+            </p>
+</div>
+</footer>
+<!-- Interactive Script -->
+<script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const word1Input = document.getElementById('word1');
+            const word2Input = document.getElementById('word2');
+            const previewText = document.getElementById('identity-preview');
+            const statusIndicator = document.getElementById('status-indicator');
+            const btnContinue = document.getElementById('btn-continue');
+            const btnGenerate = document.getElementById('btn-generate');
+            const previewContainer = document.getElementById('preview-container');
+
+            const list1 = ['Silent', 'Blue', 'Golden', 'Lost', 'Paper', 'Hidden', 'Quiet', 'Wandering', 'Pale', 'Distant'];
+            const list2 = ['River', 'Echo', 'Compass', 'Voyager', 'Lantern', 'Forest', 'Mountain', 'Cloud', 'Shadow', 'Stone'];
+
+            function capitalizeFirstLetter(string) {
+                if (!string) return '';
+                return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
+            }
+
+            function updatePreview() {
+                const w1 = capitalizeFirstLetter(word1Input.value.trim());
+                const w2 = capitalizeFirstLetter(word2Input.value.trim());
+
+                // Trigger brief animation
+                previewContainer.classList.remove('active');
+                
+                setTimeout(() => {
+                    if (w1 === '' && w2 === '') {
+                        previewText.innerHTML = '<span class="text-outline-variant">YourIdentity</span>';
+                        statusIndicator.style.opacity = '0';
+                        btnContinue.disabled = true;
+                    } else {
+                        previewText.innerHTML = `<span class="text-primary">${w1}</span><span class="text-secondary">${w2}</span>`;
+                        
+                        if (w1 !== '' && w2 !== '') {
+                            statusIndicator.style.opacity = '1';
+                            btnContinue.disabled = false;
+                        } else {
+                            statusIndicator.style.opacity = '0';
+                            btnContinue.disabled = true;
+                        }
+                    }
+                    previewContainer.classList.add('active');
+                }, 150);
+            }
+
+            word1Input.addEventListener('input', updatePreview);
+            word2Input.addEventListener('input', updatePreview);
+
+            btnGenerate.addEventListener('click', () => {
+                const randomW1 = list1[Math.floor(Math.random() * list1.length)];
+                const randomW2 = list2[Math.floor(Math.random() * list2.length)];
+                
+                word1Input.value = randomW1;
+                word2Input.value = randomW2;
+                
+                updatePreview();
+            });
+        });
+    </script>
+</body></html>

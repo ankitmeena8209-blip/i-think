@@ -24,7 +24,6 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
   const [thoughts, setThoughts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState('latest'); // 'latest' | 'top'
-  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
 
@@ -34,7 +33,6 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
     try {
       const queryParams = new URLSearchParams({
         sort,
-        search,
         page: currentPage,
         limit: 15
       });
@@ -53,12 +51,12 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
     } finally {
       setLoading(false);
     }
-  }, [sort, search]);
+  }, [sort]);
 
   useEffect(() => {
     setPage(1);
     fetchThoughts(true, 1);
-  }, [sort, search, fetchThoughts]);
+  }, [sort, fetchThoughts]);
 
   // Publish handler
   const handlePublish = async () => {
@@ -169,58 +167,34 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
 
       {/* Feed Section */}
       <section className="w-full max-w-2xl fade-in" style={{ transitionDelay: '0.2s' }}>
-        {/* Controls: Header + Search + Tabs */}
-        <div className="flex flex-col gap-4 mb-8 pb-4 border-b border-outline-variant dark:border-dark-border">
-          <div className="flex items-center justify-between">
-            <h2 className="font-headline-md text-headline-md text-primary dark:text-dark-primary">
-              Recent Thoughts
-            </h2>
+        {/* Header & Feed Sorting Tabs */}
+        <div className="flex items-center justify-between mb-8 pb-4 border-b border-outline-variant dark:border-dark-border">
+          <h2 className="font-headline-md text-headline-md text-primary dark:text-dark-primary">
+            Recent Thoughts
+          </h2>
 
-            {/* Tabs */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSort('latest')}
-                className={`font-label-sm text-label-sm px-3 py-1.5 rounded-full transition-colors cursor-pointer ${
-                  sort === 'latest'
-                    ? 'text-primary dark:text-dark-bg bg-surface-variant dark:bg-dark-primary font-medium'
-                    : 'text-secondary dark:text-dark-secondary hover:text-primary dark:hover:text-dark-primary'
-                }`}
-              >
-                Latest
-              </button>
-              <button
-                onClick={() => setSort('top')}
-                className={`font-label-sm text-label-sm px-3 py-1.5 rounded-full transition-colors cursor-pointer ${
-                  sort === 'top'
-                    ? 'text-primary dark:text-dark-bg bg-surface-variant dark:bg-dark-primary font-medium'
-                    : 'text-secondary dark:text-dark-secondary hover:text-primary dark:hover:text-dark-primary'
-                }`}
-              >
-                Top
-              </button>
-            </div>
-          </div>
-
-          {/* Search bar */}
-          <div className="relative w-full">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-secondary dark:text-dark-secondary text-[20px]">
-              search
-            </span>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search thoughts or identities..."
-              className="w-full pl-10 pr-4 py-2.5 bg-surface-container-lowest dark:bg-dark-surface border border-outline-variant dark:border-dark-border rounded-[14px] text-body-md text-primary dark:text-white placeholder:text-outline focus:outline-none focus:border-primary dark:focus:border-white transition-colors"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-primary dark:hover:text-white text-xs"
-              >
-                Clear
-              </button>
-            )}
+          {/* Feed Sort Tabs */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSort('latest')}
+              className={`font-label-sm text-label-sm px-3 py-1.5 rounded-full transition-colors cursor-pointer ${
+                sort === 'latest'
+                  ? 'text-primary dark:text-dark-bg bg-surface-variant dark:bg-dark-primary font-medium'
+                  : 'text-secondary dark:text-dark-secondary hover:text-primary dark:hover:text-dark-primary'
+              }`}
+            >
+              Latest
+            </button>
+            <button
+              onClick={() => setSort('top')}
+              className={`font-label-sm text-label-sm px-3 py-1.5 rounded-full transition-colors cursor-pointer ${
+                sort === 'top'
+                  ? 'text-primary dark:text-dark-bg bg-surface-variant dark:bg-dark-primary font-medium'
+                  : 'text-secondary dark:text-dark-secondary hover:text-primary dark:hover:text-dark-primary'
+              }`}
+            >
+              Top
+            </button>
           </div>
         </div>
 
@@ -266,7 +240,7 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
                 edit_note
               </span>
               <p className="font-body-md text-body-md text-secondary dark:text-dark-secondary">
-                {search ? 'No thoughts found matching your search.' : 'Be the first stranger to leave a thought.'}
+                Be the first stranger to leave a thought.
               </p>
             </div>
           )}
@@ -276,7 +250,7 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
             <div className="flex justify-center mt-4">
               <button
                 onClick={handleLoadMore}
-                className="font-label-md text-secondary dark:text-dark-secondary hover:text-primary dark:hover:text-white px-6 py-2.5 rounded-[14px] border border-outline-variant dark:border-dark-border transition-colors"
+                className="font-label-md text-secondary dark:text-dark-secondary hover:text-primary dark:hover:text-white px-6 py-2.5 rounded-[14px] border border-outline-variant dark:border-dark-border transition-colors cursor-pointer"
               >
                 Load More Thoughts
               </button>

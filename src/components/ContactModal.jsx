@@ -25,6 +25,7 @@ export default function ContactModal({ isOpen, onClose }) {
     try {
       const res = await fetch('/api/contact', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed })
       });

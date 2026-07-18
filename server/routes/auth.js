@@ -5,19 +5,24 @@ import db from '../db/schema.js';
 
 const router = express.Router();
 
-// Helper to get active session
+// Helper to get active session user
 export function getSessionUser(req) {
-  const token = req.cookies.ithink_session;
+  const token = req.cookies?.ithink_session;
   if (!token) return null;
 
-  const session = db.prepare(`
-    SELECT s.token, s.expires_at, u.id, u.username, u.is_admin
-    FROM sessions s
-    JOIN users u ON s.user_id = u.id
-    WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP
-  `).get(token);
+  try {
+    const session = db.prepare(`
+      SELECT s.token, s.expires_at, u.id, u.username, u.is_admin
+      FROM sessions s
+      JOIN users u ON s.user_id = u.id
+      WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')
+    `).get(token);
 
-  return session ? { id: session.id, username: session.username, isAdmin: !!session.is_admin } : null;
+    return session ? { id: session.id, username: session.username, isAdmin: !!session.is_admin } : null;
+  } catch (err) {
+    console.error('Error fetching session user:', err);
+    return null;
+  }
 }
 
 // GET /api/auth/me
@@ -73,7 +78,7 @@ router.post('/admin-login', (req, res) => {
 
 // POST /api/auth/logout
 router.post('/logout', (req, res) => {
-  const token = req.cookies.ithink_session;
+  const token = req.cookies?.ithink_session;
   if (token) {
     db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   }

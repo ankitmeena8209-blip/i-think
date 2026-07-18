@@ -14,7 +14,7 @@ router.post('/', async (req, res) => {
 
   console.log('\n==================================================');
   console.log('📩 [CONTACT FLOW STEP 1] Form submission received');
-  console.log('   User:', user ? `${user.username} (ID: ${user.id})` : 'Anonymous');
+  console.log('   Resolved User:', user ? `${user.username} (ID: ${user.id})` : 'Unauthenticated Stranger');
   console.log('   IP:', clientIp);
 
   // 1. Rate Limiting: Max 5 messages per 10 minutes (600,000 ms)
@@ -43,6 +43,7 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Message length cannot exceed 1000 characters.' });
   }
 
+  // Use authenticated user's exact username and database User ID
   const username = user ? user.username : 'Anonymous Stranger';
   const userId = user ? user.id : null;
 
@@ -57,22 +58,22 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'You have already sent this exact message recently.' });
   }
 
-  // 4. Save to Database ALWAYS
+  // 4. Save to Database
   const result = db.prepare(`
     INSERT INTO contact_messages (user_id, username, message, status, delivered_to_telegram, user_agent, ip_address)
     VALUES (?, ?, ?, 'pending_retry', 0, ?, ?)
   `).run(userId, username, trimmedMessage, userAgent, clientIp);
 
   const messageId = result.lastInsertRowid;
-  const serverTime = new Date().toLocaleString();
-  console.log(`💾 [CONTACT FLOW STEP 2] Saved contact message to DB with ID: #${messageId}`);
+  const now = new Date();
+  console.log(`💾 [CONTACT FLOW STEP 2] Saved contact message to DB with ID: #${messageId} for user: ${username} (${userId ? 'usr_' + userId : 'Unauthenticated'})`);
 
-  // 5. Send to Telegram API
+  // 5. Send to Telegram API with authenticated user metadata
   console.log('🚀 [CONTACT FLOW STEP 3] Attempting Telegram delivery...');
   const telegramRes = await sendTelegramContactNotification({
     username,
     userId,
-    serverTime,
+    rawDate: now,
     message: trimmedMessage,
     userAgent,
     ipAddress: clientIp
@@ -93,14 +94,13 @@ router.post('/', async (req, res) => {
       success: true,
       delivered: true,
       messageId,
-      responseMessage: 'Your message has been sent successfully to Telegram.'
+      responseMessage: 'Your message has been sent successfully.'
     });
   } else {
-    // Log exact Telegram diagnostic error in server logs
+    // Log Telegram diagnostic error in server logs
     console.warn('⚠️ [CONTACT FLOW STEP 4 FAILED] Telegram delivery failed:', telegramRes.error);
     console.log('==================================================\n');
 
-    // Return the exact Telegram diagnostic error to the client
     return res.status(400).json({
       success: false,
       delivered: false,

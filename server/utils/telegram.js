@@ -4,10 +4,23 @@ import db from '../db/schema.js';
 // Backend Fallback Bot Token (Kept strictly on the server)
 const HARDCODED_BOT_TOKEN = '8993080619:AAHdX1Z-Bl5IyMX_OLRD5GXcRu7cKCGknpg';
 
+// Clean Date/Time Formatter (e.g. 18 Jul 2026 11:42 PM)
+export function formatTelegramTime(dateObj = new Date()) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const day = dateObj.getDate();
+  const month = months[dateObj.getMonth()];
+  const year = dateObj.getFullYear();
+  let hours = dateObj.getHours();
+  const minutes = dateObj.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12 || 12;
+  return `${day} ${month} ${year} ${hours}:${minutes} ${ampm}`;
+}
+
 /**
- * Formats and sends a contact message notification to Telegram with auto-discovery fallback.
+ * Formats and sends a contact message notification to Telegram with authenticated user metadata.
  */
-export async function sendTelegramContactNotification({ username, userId, serverTime, message, userAgent, ipAddress }) {
+export async function sendTelegramContactNotification({ username, userId, rawDate, message, userAgent, ipAddress }) {
   console.log('\n--- [TELEGRAM BOT API AUDIT START] ---');
 
   // 1. Resolve Token
@@ -35,7 +48,6 @@ export async function sendTelegramContactNotification({ username, userId, server
       const updatesData = await updatesRes.json();
 
       if (updatesData.ok && Array.isArray(updatesData.result) && updatesData.result.length > 0) {
-        // Find newest message with chat id
         for (let i = updatesData.result.length - 1; i >= 0; i--) {
           const update = updatesData.result[i];
           const chatId = update.message?.chat?.id || update.channel_post?.chat?.id || update.my_chat_member?.chat?.id;
@@ -64,28 +76,30 @@ export async function sendTelegramContactNotification({ username, userId, server
 
   const cleanChatId = String(rawChatId).trim();
 
+  // Format metadata
+  const identityName = username || 'Anonymous Stranger';
+  const displayUserId = userId ? (typeof userId === 'string' && userId.startsWith('usr_') ? userId : `usr_${userId}`) : 'N/A (Unauthenticated)';
+  const formattedTime = formatTelegramTime(rawDate ? new Date(rawDate) : new Date());
+
   const telegramText = `📩 New Contact Message
 
-👤 Identity:
-${username || 'Anonymous'}
+Identity:
+${identityName}
 
-🆔 User ID:
-${userId ? userId : 'N/A (Anonymous)'}
+User ID:
+${displayUserId}
 
-🕒 Time:
-${serverTime || new Date().toLocaleString()}
+Time:
+${formattedTime}
 
-💬 Message:
-${message}
+Message:
+${message}`;
 
-🌐 Browser:
-${userAgent || 'Unknown Browser'}
-
-📍 IP:
-${ipAddress || 'Unknown IP'}`;
+  console.log('[Audit 2] Formatted Telegram Notification Text:');
+  console.log(telegramText);
 
   const apiUrl = `https://api.telegram.org/bot${cleanToken}/sendMessage`;
-  console.log('[Audit 2] Sending HTTP POST request to Telegram API...');
+  console.log('[Audit 3] Sending HTTP POST request to Telegram API...');
 
   try {
     const response = await fetch(apiUrl, {
@@ -98,8 +112,8 @@ ${ipAddress || 'Unknown IP'}`;
     });
 
     const data = await response.json();
-    console.log(`[Audit 3] Telegram API Status: ${response.status} ${response.statusText}`);
-    console.log('[Audit 4] Telegram API Response Payload:', JSON.stringify(data, null, 2));
+    console.log(`[Audit 4] Telegram API Status: ${response.status} ${response.statusText}`);
+    console.log('[Audit 5] Telegram API Response Payload:', JSON.stringify(data, null, 2));
 
     if (response.ok && data.ok) {
       console.log('✅ [Telegram Audit Success] Notification delivered to Telegram Chat ID:', cleanChatId);
@@ -141,7 +155,7 @@ export async function retryPendingTelegramMessages() {
       const result = await sendTelegramContactNotification({
         username: msg.username,
         userId: msg.user_id,
-        serverTime: new Date(msg.created_at).toLocaleString(),
+        rawDate: msg.created_at,
         message: msg.message,
         userAgent: msg.user_agent,
         ipAddress: msg.ip_address

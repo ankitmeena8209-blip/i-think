@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +32,8 @@ db.exec(`
     username TEXT UNIQUE NOT NULL,
     word1 TEXT NOT NULL,
     word2 TEXT NOT NULL,
+    is_admin INTEGER DEFAULT 0,
+    password_hash TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     ip_address TEXT
   );
@@ -57,5 +60,40 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_thoughts_username ON thoughts(username);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 `);
+
+// Migration helper for existing DBs
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0;`);
+} catch (e) { /* Column already exists */ }
+
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT;`);
+} catch (e) { /* Column already exists */ }
+
+/**
+ * Seed Initial Admin Account
+ * Username: being_frzi
+ * Initial Password: 95717650747200ankit
+ * Only created if an admin account does not already exist.
+ */
+function seedInitialAdmin() {
+  const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ? OR is_admin = 1').get('being_frzi');
+  
+  if (!existingAdmin) {
+    console.log('[i think] Initializing Admin Account for "being_frzi"...');
+    const initialPassword = '95717650747200ankit';
+    const saltRounds = 10;
+    const passwordHash = bcrypt.hashSync(initialPassword, saltRounds);
+
+    db.prepare(`
+      INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
+      VALUES (?, ?, ?, 1, ?, '127.0.0.1')
+    `).run('being_frzi', 'Being', 'Frzi', passwordHash);
+
+    console.log('[i think] Initial Admin Account created securely with bcrypt password hash.');
+  }
+}
+
+seedInitialAdmin();
 
 export default db;

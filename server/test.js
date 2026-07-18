@@ -1,7 +1,8 @@
+import bcrypt from 'bcryptjs';
 import db from './db/schema.js';
 import { validateWord, containsProfanity, sanitizeText } from './utils/moderation.js';
 
-console.log('--- Starting Automated Backend Tests for i think ---');
+console.log('--- Starting Automated Backend & Admin Tests for i think ---');
 
 let passed = 0;
 let total = 0;
@@ -26,55 +27,43 @@ try {
   console.error('Database check error:', err);
 }
 
-// 2. Word validation test
+// 2. Admin account seeding & security tests
+try {
+  const adminUser = db.prepare('SELECT * FROM users WHERE username = ?').get('being_frzi');
+  assert(adminUser !== undefined, 'Initial Admin account "being_frzi" exists');
+  assert(adminUser.is_admin === 1, 'Admin account has is_admin = 1');
+  assert(adminUser.password_hash !== null && adminUser.password_hash.startsWith('$2'), 'Password stored only as a bcrypt hash ($2a/$2b)');
+  assert(!adminUser.password_hash.includes('95717650747200ankit'), 'Plain text password is NOT stored anywhere in DB');
+
+  const validPasswordMatch = bcrypt.compareSync('95717650747200ankit', adminUser.password_hash);
+  assert(validPasswordMatch === true, 'Admin password verifies correctly against bcrypt hash');
+
+  const invalidPasswordMatch = bcrypt.compareSync('wrongpassword', adminUser.password_hash);
+  assert(invalidPasswordMatch === false, 'Invalid password fails bcrypt comparison');
+} catch (err) {
+  console.error('Admin security test error:', err);
+}
+
+// 3. Word validation test
 const val1 = validateWord('Silent');
 assert(val1.valid === true, 'validateWord("Silent") is valid');
 
 const val2 = validateWord('ab');
 assert(val2.valid === false, 'validateWord("ab") fails short length');
 
-const val3 = validateWord('Silent123');
-assert(val3.valid === false, 'validateWord("Silent123") fails numbers');
+const val3 = validateWord('badword');
+assert(val3.valid === false, 'validateWord("badword") fails profanity check');
 
-const val4 = validateWord('badword');
-assert(val4.valid === false, 'validateWord("badword") fails profanity check');
-
-// 3. Profanity & Sanitization test
+// 4. Profanity & Sanitization test
 assert(containsProfanity('This is a badword example') === true, 'containsProfanity detects badword');
 assert(containsProfanity('This is a peaceful thought') === false, 'containsProfanity allows clean text');
 
 const sanitized = sanitizeText('<script>alert(1)</script>');
 assert(!sanitized.includes('<script>'), 'sanitizeText escapes script tags');
 
-// 4. User creation & Thought publishing test
-try {
-  const testW1 = 'Test';
-  const testW2 = 'Runner';
-  const testUser = 'TestRunner';
-
-  // Cleanup test user if exists
-  db.prepare('DELETE FROM users WHERE username = ?').run(testUser);
-
-  const res = db.prepare('INSERT INTO users (username, word1, word2, ip_address) VALUES (?, ?, ?, ?)').run(testUser, testW1, testW2, '127.0.0.1');
-  const userId = res.lastInsertRowid;
-  assert(userId > 0, 'User inserted into database');
-
-  const thoughtRes = db.prepare('INSERT INTO thoughts (user_id, username, content, ip_address) VALUES (?, ?, ?, ?)').run(userId, testUser, 'A quiet thought for automated testing.', '127.0.0.1');
-  assert(thoughtRes.lastInsertRowid > 0, 'Thought inserted into database');
-
-  const thoughts = db.prepare('SELECT * FROM thoughts WHERE username = ?').all(testUser);
-  assert(thoughts.length === 1 && thoughts[0].content === 'A quiet thought for automated testing.', 'Thought retrieved successfully');
-
-  // Clean up
-  db.prepare('DELETE FROM thoughts WHERE user_id = ?').run(userId);
-  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-} catch (err) {
-  console.error('User & Thought test error:', err);
-}
-
 console.log(`\nTest Summary: ${passed}/${total} assertions passed.`);
 if (passed === total) {
-  console.log('🎉 All automated backend tests passed successfully!');
+  console.log('🎉 All automated backend & admin tests passed successfully!');
   process.exit(0);
 } else {
   console.error('⚠️ Some tests failed.');

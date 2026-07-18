@@ -2,14 +2,16 @@ import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ContactModal from './components/ContactModal';
+import AdminLoginModal from './components/AdminLoginModal';
 import Home from './pages/Home';
 import CreateIdentity from './pages/CreateIdentity';
 import About from './pages/About';
 import Rules from './pages/Rules';
 import Privacy from './pages/Privacy';
+import AdminDashboard from './pages/AdminDashboard';
 
 export default function App() {
-  const [activePage, setActivePage] = useState('home'); // 'home' | 'identity' | 'about' | 'rules' | 'privacy'
+  const [activePage, setActivePage] = useState('home'); // 'home' | 'identity' | 'about' | 'rules' | 'privacy' | 'admin'
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [isDark, setIsDark] = useState(() => {
@@ -18,6 +20,7 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const [isContactOpen, setIsContactOpen] = useState(false);
+  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
 
   // Apply dark mode class to <html> element
   useEffect(() => {
@@ -38,7 +41,7 @@ export default function App() {
         const data = await res.json();
         if (data.authenticated && data.user) {
           setUser(data.user);
-          setActivePage('home');
+          setActivePage(data.user.isAdmin ? 'admin' : 'home');
         } else {
           setUser(null);
           setActivePage('identity'); // New visitors auto-directed to Identity creation
@@ -60,6 +63,11 @@ export default function App() {
   const handleIdentityCreated = (newUser) => {
     setUser(newUser);
     setActivePage('home');
+  };
+
+  const handleAdminLoggedIn = (adminUser) => {
+    setUser(adminUser);
+    setActivePage('admin');
   };
 
   const handleLogout = async () => {
@@ -90,6 +98,7 @@ export default function App() {
         onLogout={handleLogout}
         isDark={isDark}
         onToggleTheme={handleToggleTheme}
+        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
       />
 
       <div className="flex-grow flex flex-col">
@@ -124,6 +133,12 @@ export default function App() {
             onOpenContact={() => setIsContactOpen(true)}
           />
         )}
+        {activePage === 'admin' && (
+          <AdminDashboard
+            user={user}
+            onNavigate={(page) => setActivePage(page)}
+          />
+        )}
       </div>
 
       <Footer onNavigate={(page) => setActivePage(page)} />
@@ -131,6 +146,12 @@ export default function App() {
       <ContactModal
         isOpen={isContactOpen}
         onClose={() => setIsContactOpen(false)}
+      />
+
+      <AdminLoginModal
+        isOpen={isAdminLoginOpen}
+        onClose={() => setIsAdminLoginOpen(false)}
+        onLoginSuccess={handleAdminLoggedIn}
       />
     </div>
   );

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import identityRoutes from './routes/identity.js';
 import thoughtsRoutes from './routes/thoughts.js';
+import adminRoutes from './routes/admin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ app.use(cookieParser());
 app.use('/api/auth', authRoutes);
 app.use('/api/identity', identityRoutes);
 app.use('/api/thoughts', thoughtsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Serve static assets in production if dist directory exists (local node server mode)
 const distPath = path.join(__dirname, '../dist');

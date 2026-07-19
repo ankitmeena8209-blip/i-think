@@ -1,5 +1,6 @@
 import express from 'express';
-import db from '../db/schema.js';
+import { db } from '../../src/lib/firebase.js';
+import { collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { getSessionUser } from './auth.js';
 import { sanitizeText, containsProfanity, checkRateLimit } from '../utils/moderation.js';
 
@@ -7,35 +8,44 @@ const router = express.Router();
 
 // GET /api/thoughts
 router.get('/', async (req, res) => {
-  const sort = req.query.sort === 'top' ? 'top' : 'latest';
-  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
-  const offset = (page - 1) * limit;
+  try {
+    const sort = req.query.sort === 'top' ? 'top' : 'latest';
+    const limitNum = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
-  let query = 'SELECT id, username, content, created_at FROM thoughts';
-  const params = [];
+    const q = query(
+      collection(db, 'thoughts'),
+      orderBy('createdAt', 'desc'),
+      limit(limitNum)
+    );
 
-  if (search) {
-    query += ' WHERE (username LIKE ? OR content LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`);
+    const snapshot = await getDocs(q);
+    const thoughts = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      let createdAtIso = new Date().toISOString();
+      if (data.created_at) {
+        createdAtIso = data.created_at;
+      } else if (data.createdAt?.toDate) {
+        createdAtIso = data.createdAt.toDate().toISOString();
+      }
+
+      return {
+        id: docSnap.id,
+        username: data.username || 'Anonymous',
+        content: data.content || '',
+        created_at: createdAtIso,
+        contentLength: (data.content || '').length
+      };
+    });
+
+    if (sort === 'top') {
+      thoughts.sort((a, b) => b.contentLength - a.contentLength);
+    }
+
+    return res.json({ thoughts, hasMore: false, page: 1 });
+  } catch (err) {
+    console.error('Error fetching thoughts from Firestore in backend:', err);
+    return res.json({ thoughts: [], hasMore: false, page: 1 });
   }
-
-  if (sort === 'top') {
-    // For top, we order by content length & recent timestamp as a proxy for depth
-    query += ' ORDER BY LENGTH(content) DESC, created_at DESC';
-  } else {
-    query += ' ORDER BY created_at DESC';
-  }
-
-  query += ' LIMIT ? OFFSET ?';
-  params.push(limit + 1, offset); // Fetch 1 extra to check if hasMore
-
-  const rows = await db.prepare(query).all(...params);
-  const hasMore = rows.length > limit;
-  const thoughts = hasMore ? rows.slice(0, limit) : rows;
-
-  return res.json({ thoughts, hasMore, page });
 });
 
 // POST /api/thoughts
@@ -70,20 +80,30 @@ router.post('/', async (req, res) => {
   }
 
   const sanitizedContent = sanitizeText(content);
+  const nowIso = new Date().toISOString();
 
   try {
-    const result = await db.prepare(`
-      INSERT INTO thoughts (user_id, username, content, ip_address)
-      VALUES (?, ?, ?, ?)
-    `).run(user.id, user.username, sanitizedContent, clientIp);
+    const docRef = await addDoc(collection(db, 'thoughts'), {
+      userId: user.id || user.username,
+      user_id: user.id || user.username,
+      username: user.username,
+      content: sanitizedContent,
+      created_at: nowIso,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ip_address: clientIp
+    });
 
-    const newThought = await db.prepare(`
-      SELECT id, username, content, created_at FROM thoughts WHERE id = ?
-    `).get(result.lastInsertRowid);
+    const newThought = {
+      id: docRef.id,
+      username: user.username,
+      content: sanitizedContent,
+      created_at: nowIso
+    };
 
     return res.json({ success: true, thought: newThought });
   } catch (err) {
-    console.error('Error inserting thought:', err);
+    console.error('Error inserting thought into Firestore:', err);
     return res.status(500).json({ error: 'Failed to publish thought. Please try again.' });
   }
 });

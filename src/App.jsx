@@ -1,4 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { auth } from './lib/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getUserSession, saveUserSession, clearUserSession } from './lib/userSession';
+
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ContactModal from './components/ContactModal';
@@ -33,26 +37,55 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Check auth session on mount & handle #admin route
+  // Check auth session & restore persistent identity on mount
   useEffect(() => {
-    async function checkAuth() {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
-        const res = await fetch('/api/auth/me');
-        const data = await res.json();
-        if (data.authenticated && data.user) {
-          setUser(data.user);
-          if (data.user.isAdmin) {
-            setActivePage('admin');
+        const storedAdmin = localStorage.getItem('ithink_admin_user');
+        const restoredUser = getUserSession();
+
+        if (firebaseUser && storedAdmin) {
+          const parsedAdmin = JSON.parse(storedAdmin);
+          setUser({ ...parsedAdmin, uid: firebaseUser.uid });
+          setActivePage('admin');
+        } else if (storedAdmin) {
+          const parsedAdmin = JSON.parse(storedAdmin);
+          setUser(parsedAdmin);
+          setActivePage('admin');
+        } else if (restoredUser) {
+          setUser(restoredUser);
+          if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+            setIsAdminLoginOpen(true);
           } else {
             setActivePage('home');
           }
         } else {
-          setUser(null);
-          // Check if URL hash is #admin or pathname is /admin
-          if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
-            setIsAdminLoginOpen(true);
+          // Check backend server session fallback
+          try {
+            const res = await fetch('/api/auth/me');
+            const data = await res.json();
+            if (data.authenticated && data.user) {
+              setUser(data.user);
+              saveUserSession(data.user);
+              if (data.user.isAdmin) {
+                setActivePage('admin');
+              } else {
+                setActivePage('home');
+              }
+            } else {
+              setUser(null);
+              if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+                setIsAdminLoginOpen(true);
+              }
+              setActivePage('identity');
+            }
+          } catch (e) {
+            setUser(null);
+            if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+              setIsAdminLoginOpen(true);
+            }
+            setActivePage('identity');
           }
-          setActivePage('identity');
         }
       } catch (err) {
         console.error('Error verifying session:', err);
@@ -60,8 +93,7 @@ export default function App() {
       } finally {
         setLoadingAuth(false);
       }
-    }
-    checkAuth();
+    });
 
     // Listen for #admin hash change
     const handleHashChange = () => {
@@ -71,7 +103,9 @@ export default function App() {
     };
     window.addEventListener('hashchange', handleHashChange);
     window.addEventListener('popstate', handleHashChange);
+
     return () => {
+      unsubscribe();
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('popstate', handleHashChange);
     };
@@ -83,22 +117,31 @@ export default function App() {
 
   const handleIdentityCreated = (newUser) => {
     setUser(newUser);
+    saveUserSession(newUser);
     setActivePage('home');
   };
 
   const handleAdminLoggedIn = (adminUser) => {
     setUser(adminUser);
+    localStorage.setItem('ithink_admin_user', JSON.stringify(adminUser));
     setActivePage('admin');
   };
 
   const handleLogout = async () => {
     try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Firebase signOut error:', err);
+    }
+
+    try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
-      console.error('Error logging out:', err);
+      // Non-blocking
     } finally {
       setUser(null);
-      // Reset URL hash so typing #admin again triggers hashchange event
+      clearUserSession();
+
       if (window.location.hash === '#admin') {
         window.history.replaceState(null, '', window.location.pathname);
       }
@@ -182,6 +225,7 @@ export default function App() {
       <ContactModal
         isOpen={isContactOpen}
         onClose={() => setIsContactOpen(false)}
+        user={user}
       />
 
       <AdminLoginModal

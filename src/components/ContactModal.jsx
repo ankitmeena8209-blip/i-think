@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { db } from '../lib/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
-export default function ContactModal({ isOpen, onClose }) {
+export default function ContactModal({ isOpen, onClose, user }) {
   const [submitted, setSubmitted] = useState(false);
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -23,29 +25,43 @@ export default function ContactModal({ isOpen, onClose }) {
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed })
+      const nowIso = new Date().toISOString();
+
+      await addDoc(collection(db, 'contact_messages'), {
+        userId: user ? (user.id || user.username) : null,
+        user_id: user ? (user.id || user.username) : null,
+        username: user ? user.username : 'Anonymous Stranger',
+        message: trimmed,
+        status: 'pending_retry',
+        deliveredToTelegram: 0,
+        delivered_to_telegram: 0,
+        userAgent: navigator.userAgent || 'Unknown Browser',
+        user_agent: navigator.userAgent || 'Unknown Browser',
+        ip_address: '127.0.0.1',
+        created_at: nowIso,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
 
-      const data = await res.json();
+      try {
+        await fetch('/api/contact', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmed })
+        });
+      } catch (e) {}
 
-      if (res.ok && data.success) {
-        setStatusText(data.responseMessage || 'Your message has been sent successfully.');
-        setSubmitted(true);
-        setTimeout(() => {
-          setSubmitted(false);
-          setMessage('');
-          onClose();
-        }, 2000);
-      } else {
-        setErrorMsg(data.error || 'Failed to send message. Please try again.');
-      }
+      setStatusText('Your message has been saved successfully.');
+      setSubmitted(true);
+      setTimeout(() => {
+        setSubmitted(false);
+        setMessage('');
+        onClose();
+      }, 2000);
     } catch (err) {
       console.error('Contact submission error:', err);
-      setErrorMsg('Network error. Please try again.');
+      setErrorMsg('Failed to send message. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -56,7 +72,7 @@ export default function ContactModal({ isOpen, onClose }) {
       <div className="w-full max-w-lg bg-surface dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-8 relative shadow-xl">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-secondary hover:text-primary dark:hover:text-white transition-colors"
+          className="absolute top-4 right-4 text-secondary hover:text-primary dark:hover:text-white transition-colors cursor-pointer"
           aria-label="Close"
         >
           <span className="material-symbols-outlined">close</span>
@@ -113,7 +129,7 @@ export default function ContactModal({ isOpen, onClose }) {
               <button
                 type="button"
                 onClick={onClose}
-                className="px-6 py-3 font-label-md text-secondary hover:text-primary dark:hover:text-white transition-colors"
+                className="px-6 py-3 font-label-md text-secondary hover:text-primary dark:hover:text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>

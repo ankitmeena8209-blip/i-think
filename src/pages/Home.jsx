@@ -1,4 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { db } from '../lib/firebase';
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  orderBy,
+  limit,
+  startAfter,
+  serverTimestamp
+} from 'firebase/firestore';
+import { sanitizeText, containsProfanity } from '../lib/moderation';
 
 // Relative time formatter
 function formatTimeAgo(dateString) {
@@ -7,7 +19,7 @@ function formatTimeAgo(dateString) {
   const date = new Date(dateString.includes('Z') ? dateString : dateString + 'Z');
   const seconds = Math.floor((now - date) / 1000);
 
-  if (seconds < 60) return 'Just now';
+  if (isNaN(seconds) || seconds < 60) return 'Just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
   const hours = Math.floor(minutes / 60);
@@ -24,39 +36,112 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
   const [thoughts, setThoughts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState('latest'); // 'latest' | 'top'
-  const [page, setPage] = useState(1);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState(null);
   const [hasMore, setHasMore] = useState(false);
 
-  // Fetch thoughts from API
-  const fetchThoughts = useCallback(async (isReset = false, currentPage = 1) => {
+  const PAGE_LIMIT = 15;
+
+  // Fetch thoughts from Firestore
+  const fetchThoughts = useCallback(async (isReset = false) => {
     setLoading(true);
     try {
-      const queryParams = new URLSearchParams({
-        sort,
-        page: currentPage,
-        limit: 15
+      let q;
+      if (isReset || !lastVisibleDoc) {
+        q = query(
+          collection(db, 'thoughts'),
+          orderBy('createdAt', 'desc'),
+          limit(PAGE_LIMIT + 1)
+        );
+      } else {
+        q = query(
+          collection(db, 'thoughts'),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastVisibleDoc),
+          limit(PAGE_LIMIT + 1)
+        );
+      }
+
+      const snapshot = await getDocs(q);
+      const docs = snapshot.docs;
+
+      const fetchedMore = docs.length > PAGE_LIMIT;
+      const docItems = (fetchedMore ? docs.slice(0, PAGE_LIMIT) : docs).map((docSnap) => {
+        const data = docSnap.data();
+        let createdAtIso = new Date().toISOString();
+        if (data.created_at) {
+          createdAtIso = data.created_at;
+        } else if (data.createdAt?.toDate) {
+          createdAtIso = data.createdAt.toDate().toISOString();
+        }
+
+        return {
+          id: docSnap.id,
+          username: data.username || 'Anonymous',
+          content: data.content || '',
+          created_at: createdAtIso,
+          contentLength: (data.content || '').length,
+          _rawDoc: docSnap
+        };
       });
 
-      const res = await fetch(`/api/thoughts?${queryParams.toString()}`);
-      const data = await res.json();
+      if (sort === 'top') {
+        docItems.sort((a, b) => b.contentLength - a.contentLength);
+      }
 
       if (isReset) {
-        setThoughts(data.thoughts || []);
+        setThoughts(docItems);
       } else {
-        setThoughts((prev) => [...prev, ...(data.thoughts || [])]);
+        setThoughts((prev) => [...prev, ...docItems]);
       }
-      setHasMore(data.hasMore || false);
+
+      setHasMore(fetchedMore);
+      if (docItems.length > 0) {
+        setLastVisibleDoc(docItems[docItems.length - 1]._rawDoc);
+      } else {
+        setLastVisibleDoc(null);
+      }
     } catch (err) {
-      console.error('Error fetching thoughts:', err);
+      console.error('Error fetching thoughts from Firestore:', err);
+
+      try {
+        const fallbackQuery = query(collection(db, 'thoughts'), limit(PAGE_LIMIT));
+        const fallbackSnapshot = await getDocs(fallbackQuery);
+        const fallbackItems = fallbackSnapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          let createdAtIso = data.created_at || new Date().toISOString();
+          if (data.createdAt?.toDate) {
+            createdAtIso = data.createdAt.toDate().toISOString();
+          }
+
+          return {
+            id: docSnap.id,
+            username: data.username || 'Anonymous',
+            content: data.content || '',
+            created_at: createdAtIso,
+            contentLength: (data.content || '').length
+          };
+        });
+
+        if (sort === 'top') {
+          fallbackItems.sort((a, b) => b.contentLength - a.contentLength);
+        } else {
+          fallbackItems.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        }
+
+        setThoughts(fallbackItems);
+        setHasMore(false);
+      } catch (fallbackErr) {
+        console.error('Fallback fetch error:', fallbackErr);
+      }
     } finally {
       setLoading(false);
     }
-  }, [sort]);
+  }, [sort, lastVisibleDoc]);
 
   useEffect(() => {
-    setPage(1);
-    fetchThoughts(true, 1);
-  }, [sort, fetchThoughts]);
+    setLastVisibleDoc(null);
+    fetchThoughts(true);
+  }, [sort]);
 
   // Publish handler
   const handlePublish = async () => {
@@ -72,36 +157,56 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
       return;
     }
 
+    if (containsProfanity(trimmed)) {
+      setPublishError('Your thought contains offensive language.');
+      return;
+    }
+
     setPublishing(true);
     setPublishError('');
 
     try {
-      const res = await fetch('/api/thoughts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: trimmed })
+      const sanitized = sanitizeText(trimmed);
+      const nowIso = new Date().toISOString();
+
+      const docRef = await addDoc(collection(db, 'thoughts'), {
+        userId: user.id || user.username,
+        user_id: user.id || user.username,
+        username: user.username,
+        content: sanitized,
+        created_at: nowIso,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ip_address: '127.0.0.1'
       });
 
-      const data = await res.json();
+      const newThoughtObj = {
+        id: docRef.id,
+        username: user.username,
+        content: sanitized,
+        created_at: nowIso
+      };
 
-      if (res.ok && data.success) {
-        setThoughtInput('');
-        setThoughts((prev) => [data.thought, ...prev]);
-      } else {
-        setPublishError(data.error || 'Failed to publish thought.');
-      }
+      setThoughtInput('');
+      setThoughts((prev) => [newThoughtObj, ...prev]);
+
+      try {
+        await fetch('/api/thoughts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: sanitized })
+        });
+      } catch (e) {}
     } catch (err) {
       console.error('Error publishing thought:', err);
-      setPublishError('Network error. Please try again.');
+      setPublishError('Failed to publish thought. Please try again.');
     } finally {
       setPublishing(false);
     }
   };
 
   const handleLoadMore = () => {
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchThoughts(false, nextPage);
+    fetchThoughts(false);
   };
 
   const charCount = thoughtInput.length;

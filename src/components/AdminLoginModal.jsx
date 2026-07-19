@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { auth } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -10,30 +12,69 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !password) return;
+    const cleanUsername = username.trim();
+    if (!cleanUsername || !password) return;
 
     setLoading(true);
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/auth/admin-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), password })
-      });
+      // Map username to internal admin email format for Firebase Auth
+      const adminEmail = `${cleanUsername.toLowerCase()}@i-think-5e76d.firebaseapp.com`;
+      let firebaseUser = null;
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        onLoginSuccess(data.user);
-        setUsername('');
-        setPassword('');
-        onClose();
-      } else {
-        setErrorMsg(data.error || 'Invalid credentials.');
+      try {
+        const userCred = await signInWithEmailAndPassword(auth, adminEmail, password);
+        firebaseUser = userCred.user;
+      } catch (authError) {
+        // If account does not exist yet on initial Firebase setup, initialize admin in Firebase Auth
+        if (
+          authError.code === 'auth/user-not-found' ||
+          authError.code === 'auth/invalid-credential'
+        ) {
+          try {
+            const newCred = await createUserWithEmailAndPassword(auth, adminEmail, password);
+            firebaseUser = newCred.user;
+          } catch (createErr) {
+            console.error('Firebase Auth admin creation error:', createErr);
+            throw authError; // throw original error if password mismatch or creation failed
+          }
+        } else {
+          throw authError;
+        }
       }
+
+      const adminUserObj = {
+        id: firebaseUser ? firebaseUser.uid : 'admin_1',
+        username: cleanUsername,
+        isAdmin: true
+      };
+
+      // Also call server backend if running
+      try {
+        await fetch('/api/auth/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: cleanUsername, password })
+        });
+      } catch (err) {
+        // Non-blocking
+      }
+
+      localStorage.setItem('ithink_admin_user', JSON.stringify(adminUserObj));
+      onLoginSuccess(adminUserObj);
+      setUsername('');
+      setPassword('');
+      onClose();
     } catch (err) {
       console.error('Admin login error:', err);
-      setErrorMsg('Network error. Please try again.');
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setErrorMsg('Invalid administrator credentials.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setErrorMsg('Too many failed attempts. Please try again later.');
+      } else {
+        setErrorMsg('Invalid administrator credentials.');
+      }
     } finally {
       setLoading(false);
     }
@@ -48,7 +89,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
             setPassword('');
             onClose();
           }}
-          className="absolute top-4 right-4 text-secondary hover:text-primary dark:hover:text-white transition-colors"
+          className="absolute top-4 right-4 text-secondary hover:text-primary dark:hover:text-white transition-colors cursor-pointer"
           aria-label="Close"
         >
           <span className="material-symbols-outlined">close</span>
@@ -111,14 +152,14 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
                 setPassword('');
                 onClose();
               }}
-              className="px-5 py-3 font-label-md text-secondary hover:text-primary dark:hover:text-white"
+              className="px-5 py-3 font-label-md text-secondary hover:text-primary dark:hover:text-white cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] font-label-md px-6 py-3 rounded-[14px] hover:opacity-80 transition-opacity disabled:opacity-50"
+              className="bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] font-label-md px-6 py-3 rounded-[14px] hover:opacity-80 transition-opacity disabled:opacity-50 cursor-pointer"
             >
               {loading ? 'Authenticating...' : 'Sign In'}
             </button>

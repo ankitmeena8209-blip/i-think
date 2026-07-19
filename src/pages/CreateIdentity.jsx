@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { db } from '../lib/firebase';
+import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { validateWord, capitalizeWord, descriptiveWords, natureWords } from '../lib/moderation';
+import { generateUserId, saveUserSession } from '../lib/userSession';
 
 export default function CreateIdentity({ onIdentityCreated, onCancel }) {
   const [word1, setWord1] = useState('');
@@ -8,21 +12,67 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Capitalize helpers
-  const capitalize = (str) => {
-    if (!str) return '';
-    const clean = str.trim().replace(/[^a-zA-Z]/g, '');
-    return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+  const formattedW1 = capitalizeWord(word1);
+  const formattedW2 = capitalizeWord(word2);
+  const previewUsername = `${formattedW1}${formattedW2}`;
+
+  // Helper to check if username exists in Firestore
+  const isUsernameTakenInFirestore = async (username) => {
+    try {
+      const q = query(collection(db, 'users'), where('username', '==', username));
+      const snapshot = await getDocs(q);
+      return !snapshot.empty;
+    } catch (err) {
+      console.error('Error querying Firestore for username:', err);
+      return false;
+    }
   };
 
-  const formattedW1 = capitalize(word1);
-  const formattedW2 = capitalize(word2);
-  const previewUsername = `${formattedW1}${formattedW2}`;
+  // Helper to generate N available suggestions
+  const generateSuggestionsFirestore = async (requestedW1, requestedW2, count = 6) => {
+    const suggestions = [];
+    let attempts = 0;
+
+    while (suggestions.length < count && attempts < 50) {
+      attempts++;
+      let w1, w2;
+
+      if (attempts % 2 === 0 && requestedW1) {
+        w1 = requestedW1;
+        w2 = natureWords[Math.floor(Math.random() * natureWords.length)];
+      } else if (attempts % 3 === 0 && requestedW2) {
+        w1 = descriptiveWords[Math.floor(Math.random() * descriptiveWords.length)];
+        w2 = requestedW2;
+      } else {
+        w1 = descriptiveWords[Math.floor(Math.random() * descriptiveWords.length)];
+        w2 = natureWords[Math.floor(Math.random() * natureWords.length)];
+      }
+
+      w1 = capitalizeWord(w1);
+      w2 = capitalizeWord(w2);
+      const combined = `${w1}${w2}`;
+
+      const taken = await isUsernameTakenInFirestore(combined);
+      if (!taken && !suggestions.some((s) => s.username === combined)) {
+        suggestions.push({ word1: w1, word2: w2, username: combined });
+      }
+    }
+
+    return suggestions;
+  };
 
   // Real-time DB check with debounce
   const checkAvailability = useCallback(async (w1, w2) => {
-    if (!w1 || !w2 || w1.length < 3 || w2.length < 3) {
-      setAvailability(null);
+    const v1 = validateWord(w1);
+    if (!v1.valid) {
+      setAvailability({ available: false, reason: v1.reason, field: 'word1' });
+      setChecking(false);
+      return;
+    }
+
+    const v2 = validateWord(w2);
+    if (!v2.valid) {
+      setAvailability({ available: false, reason: v2.reason, field: 'word2' });
       setChecking(false);
       return;
     }
@@ -31,16 +81,28 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/identity/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word1: w1, word2: w2 })
-      });
-      const data = await res.json();
-      setAvailability(data);
+      const username = `${w1}${w2}`;
+      const taken = await isUsernameTakenInFirestore(username);
+
+      if (taken) {
+        const suggestions = await generateSuggestionsFirestore(w1, w2, 6);
+        setAvailability({
+          available: false,
+          reason: 'This identity is already taken.',
+          username,
+          suggestions
+        });
+      } else {
+        setAvailability({
+          available: true,
+          username,
+          word1: w1,
+          word2: w2
+        });
+      }
     } catch (err) {
       console.error('Error checking availability:', err);
-      setAvailability({ available: false, reason: 'Network error checking availability.' });
+      setAvailability({ available: false, reason: 'Error checking identity availability.' });
     } finally {
       setChecking(false);
     }
@@ -63,17 +125,31 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
     setChecking(true);
     setErrorMsg('');
     try {
-      const res = await fetch('/api/identity/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setWord1(data.word1);
-        setWord2(data.word2);
+      let attempts = 0;
+      let found = null;
+
+      while (attempts < 30) {
+        attempts++;
+        const w1 = capitalizeWord(descriptiveWords[Math.floor(Math.random() * descriptiveWords.length)]);
+        const w2 = capitalizeWord(natureWords[Math.floor(Math.random() * natureWords.length)]);
+        const username = `${w1}${w2}`;
+
+        const taken = await isUsernameTakenInFirestore(username);
+        if (!taken) {
+          found = { word1: w1, word2: w2 };
+          break;
+        }
+      }
+
+      if (found) {
+        setWord1(found.word1);
+        setWord2(found.word2);
+      } else {
+        setErrorMsg('Failed to generate available identity. Please try again.');
       }
     } catch (err) {
       console.error('Failed to generate identity:', err);
+      setErrorMsg('Failed to generate identity.');
     } finally {
       setChecking(false);
     }
@@ -87,24 +163,62 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/identity/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word1: formattedW1, word2: formattedW2 })
-      });
+      const username = `${formattedW1}${formattedW2}`;
+      const taken = await isUsernameTakenInFirestore(username);
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        onIdentityCreated(data.user);
-      } else {
-        setErrorMsg(data.error || 'Failed to create identity.');
-        if (data.suggestions) {
-          setAvailability({ available: false, reason: data.error, suggestions: data.suggestions });
-        }
+      if (taken) {
+        const suggestions = await generateSuggestionsFirestore(formattedW1, formattedW2, 6);
+        setAvailability({ available: false, reason: 'This identity is already taken.', suggestions });
+        setErrorMsg('This identity is already taken.');
+        setSubmitting(false);
+        return;
       }
+
+      // Generate permanent unique User ID
+      const userId = generateUserId();
+      const nowIso = new Date().toISOString();
+
+      // Write document using setDoc with merge: true for document creation safety
+      await setDoc(
+        doc(db, 'users', userId),
+        {
+          id: userId,
+          username,
+          word1: formattedW1,
+          word2: formattedW2,
+          is_admin: 0,
+          created_at: nowIso,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          ip_address: '127.0.0.1'
+        },
+        { merge: true }
+      );
+
+      const userObj = {
+        id: userId,
+        username,
+        word1: formattedW1,
+        word2: formattedW2,
+        isAdmin: false
+      };
+
+      // Save user identity to persistent cookie + localStorage
+      saveUserSession(userObj);
+
+      // Fallback backend session creation
+      try {
+        await fetch('/api/identity/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ word1: formattedW1, word2: formattedW2 })
+        });
+      } catch (e) {}
+
+      onIdentityCreated(userObj);
     } catch (err) {
       console.error('Error creating identity:', err);
-      setErrorMsg('Network error. Please try again.');
+      setErrorMsg('Failed to create identity. Please try again.');
     } finally {
       setSubmitting(false);
     }

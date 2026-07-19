@@ -1,35 +1,33 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { db, auth } from '../lib/firebase';
+import {
+  collection,
+  onSnapshot,
+  doc,
+  deleteDoc,
+  updateDoc,
+  writeBatch
+} from 'firebase/firestore';
+import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 
 export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdminLogin }) {
   // Navigation Tabs: 'dashboard' | 'users' | 'thoughts' | 'messages' | 'settings'
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  // Stats State
-  const [stats, setStats] = useState({
-    userCount: 0,
-    thoughtCount: 0,
-    contactCount: 0,
-    messagesToday: 0,
-    activeUsers: 0
-  });
-  const [loadingStats, setLoadingStats] = useState(true);
+  // Real-time Collections State from Firestore
+  const [rawUsers, setRawUsers] = useState([]);
+  const [rawThoughts, setRawThoughts] = useState([]);
+  const [rawMessages, setRawMessages] = useState([]);
 
-  // Users Page State
-  const [usersList, setUsersList] = useState([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadingThoughts, setLoadingThoughts] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(true);
+
+  // Search States
   const [usersSearch, setUsersSearch] = useState('');
-
-  // Thoughts Page State
-  const [thoughtsList, setThoughtsList] = useState([]);
-  const [loadingThoughts, setLoadingThoughts] = useState(false);
   const [thoughtsSearch, setThoughtsSearch] = useState('');
-  const [selectedThoughtIds, setSelectedThoughtIds] = useState([]);
-
-  // Messages Page State
-  const [messagesList, setMessagesList] = useState([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
   const [messagesSearch, setMessagesSearch] = useState('');
-  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [selectedThoughtIds, setSelectedThoughtIds] = useState([]);
 
   // Settings State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -38,87 +36,177 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
   const [changingPass, setChangingPass] = useState(false);
   const [passStatus, setPassStatus] = useState({ error: '', success: '' });
 
-  // 1. Fetch Stats
-  const fetchStats = useCallback(async () => {
-    setLoadingStats(true);
-    try {
-      const res = await fetch('/api/admin/stats');
-      if (res.ok) {
-        const data = await res.json();
-        setStats(data);
-      }
-    } catch (err) {
-      console.error('Error fetching admin stats:', err);
-    } finally {
-      setLoadingStats(false);
-    }
-  }, []);
-
-  // 2. Fetch Users
-  const fetchUsers = useCallback(async (query = '') => {
-    setLoadingUsers(true);
-    try {
-      const url = query ? `/api/admin/users?search=${encodeURIComponent(query)}` : '/api/admin/users';
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setUsersList(data.users || []);
-      }
-    } catch (err) {
-      console.error('Error fetching users:', err);
-    } finally {
-      setLoadingUsers(false);
-    }
-  }, []);
-
-  // 3. Fetch Thoughts
-  const fetchThoughts = useCallback(async (query = '') => {
-    setLoadingThoughts(true);
-    try {
-      const url = query ? `/api/admin/thoughts?search=${encodeURIComponent(query)}` : '/api/admin/thoughts';
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setThoughtsList(data.thoughts || []);
-        setSelectedThoughtIds([]);
-      }
-    } catch (err) {
-      console.error('Error fetching thoughts:', err);
-    } finally {
-      setLoadingThoughts(false);
-    }
-  }, []);
-
-  // 4. Fetch Messages
-  const fetchMessages = useCallback(async (query = '') => {
-    setLoadingMessages(true);
-    try {
-      const url = query ? `/api/admin/contact-messages?search=${encodeURIComponent(query)}` : '/api/admin/contact-messages';
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setMessagesList(data.messages || []);
-      }
-    } catch (err) {
-      console.error('Error fetching messages:', err);
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, []);
-
+  // 1. Real-time Firestore Listeners
   useEffect(() => {
-    if (user && user.isAdmin) {
-      fetchStats();
-    }
-  }, [user, fetchStats]);
+    if (!user || !user.isAdmin) return;
 
-  useEffect(() => {
-    if (user && user.isAdmin) {
-      if (activeTab === 'users') fetchUsers(usersSearch);
-      if (activeTab === 'thoughts') fetchThoughts(thoughtsSearch);
-      if (activeTab === 'messages') fetchMessages(messagesSearch);
-    }
-  }, [user, activeTab, usersSearch, thoughtsSearch, messagesSearch, fetchUsers, fetchThoughts, fetchMessages]);
+    // Listen to Users
+    const unsubscribeUsers = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        const list = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          let createdAt = new Date().toISOString();
+          if (data.created_at) {
+            createdAt = data.created_at;
+          } else if (data.createdAt?.toDate) {
+            createdAt = data.createdAt.toDate().toISOString();
+          }
+
+          return {
+            id: docSnap.id,
+            username: data.username || 'Anonymous',
+            word1: data.word1 || '',
+            word2: data.word2 || '',
+            is_admin: data.is_admin || 0,
+            created_at: createdAt,
+            ip_address: data.ip_address || '127.0.0.1'
+          };
+        });
+        setRawUsers(list);
+        setLoadingUsers(false);
+      },
+      (err) => {
+        console.error('Error listening to users collection:', err);
+        setLoadingUsers(false);
+      }
+    );
+
+    // Listen to Thoughts
+    const unsubscribeThoughts = onSnapshot(
+      collection(db, 'thoughts'),
+      (snapshot) => {
+        const list = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          let createdAt = new Date().toISOString();
+          if (data.created_at) {
+            createdAt = data.created_at;
+          } else if (data.createdAt?.toDate) {
+            createdAt = data.createdAt.toDate().toISOString();
+          }
+
+          return {
+            id: docSnap.id,
+            user_id: data.userId || data.user_id || docSnap.id,
+            username: data.username || 'Anonymous',
+            content: data.content || '',
+            created_at: createdAt,
+            ip_address: data.ip_address || '127.0.0.1'
+          };
+        });
+        setRawThoughts(list);
+        setLoadingThoughts(false);
+      },
+      (err) => {
+        console.error('Error listening to thoughts collection:', err);
+        setLoadingThoughts(false);
+      }
+    );
+
+    // Listen to Contact Messages
+    const unsubscribeMessages = onSnapshot(
+      collection(db, 'contact_messages'),
+      (snapshot) => {
+        const list = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          let createdAt = new Date().toISOString();
+          if (data.created_at) {
+            createdAt = data.created_at;
+          } else if (data.createdAt?.toDate) {
+            createdAt = data.createdAt.toDate().toISOString();
+          }
+
+          return {
+            id: docSnap.id,
+            user_id: data.userId || data.user_id || null,
+            username: data.username || 'Anonymous Stranger',
+            message: data.message || '',
+            status: data.status || 'pending_retry',
+            delivered_to_telegram: data.deliveredToTelegram || data.delivered_to_telegram || 0,
+            user_agent: data.userAgent || data.user_agent || 'Unknown',
+            ip_address: data.ip_address || '127.0.0.1',
+            created_at: createdAt
+          };
+        });
+        setRawMessages(list);
+        setLoadingMessages(false);
+      },
+      (err) => {
+        console.error('Error listening to contact_messages collection:', err);
+        setLoadingMessages(false);
+      }
+    );
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeThoughts();
+      unsubscribeMessages();
+    };
+  }, [user]);
+
+  // Derived Stats Overview
+  const stats = React.useMemo(() => {
+    const nonAdminUsers = rawUsers.filter((u) => !u.is_admin);
+    const userCount = nonAdminUsers.length;
+    const thoughtCount = rawThoughts.length;
+    const contactCount = rawMessages.length;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const messagesToday = rawMessages.filter((m) => m.created_at.startsWith(todayStr)).length;
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const activeUsersSet = new Set();
+    rawThoughts.forEach((t) => {
+      if (new Date(t.created_at) >= sevenDaysAgo) {
+        activeUsersSet.add(t.username);
+      }
+    });
+
+    return {
+      userCount,
+      thoughtCount,
+      contactCount,
+      messagesToday,
+      activeUsers: activeUsersSet.size
+    };
+  }, [rawUsers, rawThoughts, rawMessages]);
+
+  // Filtered Users List
+  const filteredUsers = React.useMemo(() => {
+    const list = rawUsers.filter((u) => !u.is_admin);
+    if (!usersSearch.trim()) return list;
+    const term = usersSearch.trim().toLowerCase();
+    return list.filter(
+      (u) =>
+        u.username.toLowerCase().includes(term) ||
+        u.id.toLowerCase().includes(term) ||
+        `usr_${u.id}`.toLowerCase().includes(term)
+    );
+  }, [rawUsers, usersSearch]);
+
+  // Filtered Thoughts List
+  const filteredThoughts = React.useMemo(() => {
+    if (!thoughtsSearch.trim()) return rawThoughts;
+    const term = thoughtsSearch.trim().toLowerCase();
+    return rawThoughts.filter(
+      (t) =>
+        t.username.toLowerCase().includes(term) ||
+        t.content.toLowerCase().includes(term) ||
+        String(t.user_id).toLowerCase().includes(term)
+    );
+  }, [rawThoughts, thoughtsSearch]);
+
+  // Filtered Messages List
+  const filteredMessages = React.useMemo(() => {
+    if (!messagesSearch.trim()) return rawMessages;
+    const term = messagesSearch.trim().toLowerCase();
+    return rawMessages.filter(
+      (m) =>
+        m.username.toLowerCase().includes(term) ||
+        m.message.toLowerCase().includes(term) ||
+        String(m.user_id || '').toLowerCase().includes(term)
+    );
+  }, [rawMessages, messagesSearch]);
 
   // Access Control Guard
   if (!user || !user.isAdmin) {
@@ -157,30 +245,48 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
 
   // User Actions
   const handleDeleteUser = async (userId, username) => {
-    if (!window.confirm(`Are you sure you want to permanently delete identity "${username}" and all associated thoughts & sessions?`)) return;
+    if (
+      !window.confirm(
+        `Are you sure you want to permanently delete identity "${username}" and all associated thoughts?`
+      )
+    )
+      return;
 
     try {
-      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setUsersList((prev) => prev.filter((u) => u.id !== userId));
-        fetchStats();
-      }
+      // Delete user document from Firestore
+      await deleteDoc(doc(db, 'users', userId));
+
+      // Batch delete thoughts for this user
+      const batch = writeBatch(db);
+      const userThoughts = rawThoughts.filter(
+        (t) => t.username === username || String(t.user_id) === String(userId)
+      );
+      userThoughts.forEach((t) => {
+        batch.delete(doc(db, 'thoughts', t.id));
+      });
+      await batch.commit();
     } catch (err) {
-      console.error('Error deleting user:', err);
+      console.error('Error deleting user from Firestore:', err);
+      alert('Failed to delete user.');
     }
   };
 
   const handleDeleteAllUserThoughts = async (userId, username) => {
-    if (!window.confirm(`Are you sure you want to delete ALL thoughts published by "${username}"?`)) return;
+    if (!window.confirm(`Are you sure you want to delete ALL thoughts published by "${username}"?`))
+      return;
 
     try {
-      const res = await fetch(`/api/admin/users/${userId}/thoughts`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchUsers(usersSearch);
-        fetchStats();
-      }
+      const batch = writeBatch(db);
+      const userThoughts = rawThoughts.filter(
+        (t) => t.username === username || String(t.user_id) === String(userId)
+      );
+      userThoughts.forEach((t) => {
+        batch.delete(doc(db, 'thoughts', t.id));
+      });
+      await batch.commit();
     } catch (err) {
-      console.error('Error deleting user thoughts:', err);
+      console.error('Error deleting thoughts for user:', err);
+      alert('Failed to delete user thoughts.');
     }
   };
 
@@ -189,35 +295,29 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     if (!window.confirm('Permanently delete this thought?')) return;
 
     try {
-      const res = await fetch(`/api/admin/thoughts/${thoughtId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setThoughtsList((prev) => prev.filter((t) => t.id !== thoughtId));
-        setSelectedThoughtIds((prev) => prev.filter((id) => id !== thoughtId));
-        fetchStats();
-      }
+      await deleteDoc(doc(db, 'thoughts', thoughtId));
+      setSelectedThoughtIds((prev) => prev.filter((id) => id !== thoughtId));
     } catch (err) {
-      console.error('Error deleting thought:', err);
+      console.error('Error deleting thought from Firestore:', err);
+      alert('Failed to delete thought.');
     }
   };
 
   const handleBulkDeleteThoughts = async () => {
     if (selectedThoughtIds.length === 0) return;
-    if (!window.confirm(`Permanently delete ${selectedThoughtIds.length} selected thoughts?`)) return;
+    if (!window.confirm(`Permanently delete ${selectedThoughtIds.length} selected thoughts?`))
+      return;
 
     try {
-      const res = await fetch('/api/admin/thoughts/bulk-delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedThoughtIds })
+      const batch = writeBatch(db);
+      selectedThoughtIds.forEach((id) => {
+        batch.delete(doc(db, 'thoughts', id));
       });
-
-      if (res.ok) {
-        setThoughtsList((prev) => prev.filter((t) => !selectedThoughtIds.includes(t.id)));
-        setSelectedThoughtIds([]);
-        fetchStats();
-      }
+      await batch.commit();
+      setSelectedThoughtIds([]);
     } catch (err) {
-      console.error('Error bulk deleting thoughts:', err);
+      console.error('Error bulk deleting thoughts from Firestore:', err);
+      alert('Failed to bulk delete thoughts.');
     }
   };
 
@@ -228,10 +328,10 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
   };
 
   const toggleSelectAllThoughts = () => {
-    if (selectedThoughtIds.length === thoughtsList.length) {
+    if (selectedThoughtIds.length === filteredThoughts.length) {
       setSelectedThoughtIds([]);
     } else {
-      setSelectedThoughtIds(thoughtsList.map((t) => t.id));
+      setSelectedThoughtIds(filteredThoughts.map((t) => t.id));
     }
   };
 
@@ -240,31 +340,25 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     if (!window.confirm('Permanently delete this contact message?')) return;
 
     try {
-      const res = await fetch(`/api/admin/contact-messages/${msgId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setMessagesList((prev) => prev.filter((m) => m.id !== msgId));
-        if (selectedMessage?.id === msgId) setSelectedMessage(null);
-        fetchStats();
-      }
+      await deleteDoc(doc(db, 'contact_messages', msgId));
     } catch (err) {
-      console.error('Error deleting message:', err);
+      console.error('Error deleting contact message from Firestore:', err);
+      alert('Failed to delete contact message.');
     }
   };
 
   const handleResolveMessage = async (msgId) => {
     try {
-      const res = await fetch(`/api/admin/contact-messages/${msgId}/resolve`, { method: 'PATCH' });
-      if (res.ok) {
-        setMessagesList((prev) =>
-          prev.map((m) => (m.id === msgId ? { ...m, status: 'resolved' } : m))
-        );
-      }
+      await updateDoc(doc(db, 'contact_messages', msgId), {
+        status: 'resolved'
+      });
     } catch (err) {
-      console.error('Error resolving message:', err);
+      console.error('Error marking message as resolved:', err);
+      alert('Failed to resolve message.');
     }
   };
 
-  // Password Change Handler
+  // Password Change Handler using Firebase Auth
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPassStatus({ error: '', success: '' });
@@ -287,25 +381,24 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     setChangingPass(true);
 
     try {
-      const res = await fetch('/api/admin/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword })
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setPassStatus({ error: '', success: 'Password updated successfully.' });
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        setPassStatus({ error: data.error || 'Failed to update password.', success: '' });
+      const currentUser = auth.currentUser;
+      if (currentUser && currentUser.email) {
+        const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
+        await reauthenticateWithCredential(currentUser, credential);
+        await updatePassword(currentUser, newPassword);
       }
+
+      setPassStatus({ error: '', success: 'Password updated successfully in Firebase Auth.' });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch (err) {
       console.error('Password change error:', err);
-      setPassStatus({ error: 'Network error. Please try again.', success: '' });
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setPassStatus({ error: 'Incorrect current password.', success: '' });
+      } else {
+        setPassStatus({ error: err.message || 'Failed to update password.', success: '' });
+      }
     } finally {
       setChangingPass(false);
     }
@@ -373,7 +466,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
       {activeTab === 'dashboard' && (
         <section className="space-y-8">
           <h2 className="font-headline-md text-headline-md text-primary dark:text-white">
-            System Metrics Overview
+            System Metrics Overview (Real-time Firestore)
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -382,7 +475,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Total Users
               </span>
               <p className="font-display text-3xl text-primary dark:text-white">
-                {loadingStats ? '...' : stats.userCount}
+                {loadingUsers ? '...' : stats.userCount}
               </p>
             </div>
 
@@ -391,7 +484,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Total Thoughts
               </span>
               <p className="font-display text-3xl text-primary dark:text-white">
-                {loadingStats ? '...' : stats.thoughtCount}
+                {loadingThoughts ? '...' : stats.thoughtCount}
               </p>
             </div>
 
@@ -400,7 +493,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Contact Messages
               </span>
               <p className="font-display text-3xl text-primary dark:text-white">
-                {loadingStats ? '...' : stats.contactCount}
+                {loadingMessages ? '...' : stats.contactCount}
               </p>
             </div>
 
@@ -409,7 +502,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Messages Today
               </span>
               <p className="font-display text-3xl text-primary dark:text-white">
-                {loadingStats ? '...' : stats.messagesToday}
+                {loadingMessages ? '...' : stats.messagesToday}
               </p>
             </div>
 
@@ -418,7 +511,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Active Users (7d)
               </span>
               <p className="font-display text-3xl text-primary dark:text-white">
-                {loadingStats ? '...' : stats.activeUsers}
+                {loadingThoughts ? '...' : stats.activeUsers}
               </p>
             </div>
           </div>
@@ -434,7 +527,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Users Management
               </h2>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                Search specifically by Identity (username) or User ID.
+                Search specifically by Identity (username) or User ID. Real-time updates from Firestore.
               </p>
             </div>
 
@@ -447,13 +540,13 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 type="text"
                 value={usersSearch}
                 onChange={(e) => setUsersSearch(e.target.value)}
-                placeholder="Search Identity or User ID (e.g. usr_1)..."
+                placeholder="Search Identity or User ID..."
                 className="w-full pl-10 pr-8 py-2.5 bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] text-body-md text-primary dark:text-white placeholder:text-outline focus:outline-none focus:border-primary dark:focus:border-white"
               />
               {usersSearch && (
                 <button
                   onClick={() => setUsersSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs cursor-pointer"
                 >
                   Clear
                 </button>
@@ -461,10 +554,10 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
             </div>
           </div>
 
-          {/* Users Table / Grid */}
+          {/* Users Grid */}
           {loadingUsers ? (
             <div className="py-8 text-center text-secondary">Loading user identities...</div>
-          ) : usersList.length === 0 ? (
+          ) : filteredUsers.length === 0 ? (
             <div className="py-12 text-center border border-dashed border-outline-variant dark:border-[#333333] rounded-[14px]">
               <span className="material-symbols-outlined text-4xl text-outline mb-2">group_off</span>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
@@ -473,50 +566,56 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {usersList.map((usr) => (
-                <div
-                  key={usr.id}
-                  className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 space-y-4 flex flex-col justify-between"
-                >
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className="font-label-md text-primary dark:text-white font-semibold text-lg block">
-                          👤 {usr.username}
-                        </span>
-                        <span className="font-label-sm text-xs text-secondary dark:text-[#A1A1A1] bg-surface dark:bg-[#111111] px-2.5 py-0.5 rounded-full border border-outline-variant/30 inline-block mt-1">
-                          User ID: usr_{usr.id}
+              {filteredUsers.map((usr) => {
+                const userThoughtCount = rawThoughts.filter(
+                  (t) => t.username === usr.username || String(t.user_id) === String(usr.id)
+                ).length;
+
+                return (
+                  <div
+                    key={usr.id}
+                    className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 space-y-4 flex flex-col justify-between"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-label-md text-primary dark:text-white font-semibold text-lg block">
+                            👤 {usr.username}
+                          </span>
+                          <span className="font-label-sm text-xs text-secondary dark:text-[#A1A1A1] bg-surface dark:bg-[#111111] px-2.5 py-0.5 rounded-full border border-outline-variant/30 inline-block mt-1">
+                            ID: {usr.id}
+                          </span>
+                        </div>
+                        <span className="font-label-sm text-xs text-outline dark:text-dark-secondary">
+                          {userThoughtCount} thoughts
                         </span>
                       </div>
-                      <span className="font-label-sm text-xs text-outline dark:text-dark-secondary">
-                        {usr.thought_count || 0} thoughts
-                      </span>
+
+                      <div className="text-xs font-label-sm text-secondary dark:text-[#A1A1A1] space-y-1 pt-2 border-t border-outline-variant/20 dark:border-[#2a2a2a]">
+                        <p>Words: {usr.word1} + {usr.word2}</p>
+                        <p>Joined: {new Date(usr.created_at).toLocaleDateString()}</p>
+                        <p>IP: {usr.ip_address}</p>
+                      </div>
                     </div>
 
-                    <div className="text-xs font-label-sm text-secondary dark:text-[#A1A1A1] space-y-1 pt-2 border-t border-outline-variant/20 dark:border-[#2a2a2a]">
-                      <p>Joined: {new Date(usr.created_at).toLocaleDateString()}</p>
-                      <p>Last Active: {usr.last_active ? new Date(usr.last_active).toLocaleString() : 'N/A'}</p>
-                      <p>IP: {usr.ip_address || 'Unknown'}</p>
+                    <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/20 dark:border-[#2a2a2a]">
+                      <button
+                        onClick={() => handleDeleteAllUserThoughts(usr.id, usr.username)}
+                        className="text-amber-600 dark:text-amber-400 hover:underline font-label-sm text-xs px-3 py-1.5 cursor-pointer"
+                      >
+                        Delete All Thoughts
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteUser(usr.id, usr.username)}
+                        className="text-error hover:text-red-600 font-label-sm text-xs px-3 py-1.5 rounded-[14px] border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                      >
+                        Delete User
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/20 dark:border-[#2a2a2a]">
-                    <button
-                      onClick={() => handleDeleteAllUserThoughts(usr.id, usr.username)}
-                      className="text-amber-600 dark:text-amber-400 hover:underline font-label-sm text-xs px-3 py-1.5 cursor-pointer"
-                    >
-                      Delete All Thoughts
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteUser(usr.id, usr.username)}
-                      className="text-error hover:text-red-600 font-label-sm text-xs px-3 py-1.5 rounded-[14px] border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
-                    >
-                      Delete User
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -531,7 +630,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Thoughts Management
               </h2>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                Search specifically by Identity, Thought content, or User ID.
+                Search specifically by Identity, Thought content, or User ID. Real-time updates.
               </p>
             </div>
 
@@ -553,13 +652,13 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                   type="text"
                   value={thoughtsSearch}
                   onChange={(e) => setThoughtsSearch(e.target.value)}
-                  placeholder="Search Identity, Thought, or User ID..."
+                  placeholder="Search Identity, Thought, or ID..."
                   className="w-full pl-10 pr-8 py-2.5 bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] text-body-md text-primary dark:text-white placeholder:text-outline focus:outline-none focus:border-primary dark:focus:border-white"
                 />
                 {thoughtsSearch && (
                   <button
                     onClick={() => setThoughtsSearch('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs cursor-pointer"
                   >
                     Clear
                   </button>
@@ -569,16 +668,16 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
           </div>
 
           {/* Bulk Select All Controls */}
-          {thoughtsList.length > 0 && (
+          {filteredThoughts.length > 0 && (
             <div className="flex items-center gap-3 bg-surface dark:bg-[#111111] px-4 py-2 rounded-[14px] border border-outline-variant/30">
               <input
                 type="checkbox"
-                checked={selectedThoughtIds.length === thoughtsList.length}
+                checked={selectedThoughtIds.length === filteredThoughts.length}
                 onChange={toggleSelectAllThoughts}
                 className="w-4 h-4 cursor-pointer"
               />
               <span className="font-label-sm text-secondary dark:text-[#A1A1A1]">
-                Select All Thoughts ({thoughtsList.length})
+                Select All Thoughts ({filteredThoughts.length})
               </span>
             </div>
           )}
@@ -586,7 +685,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
           {/* Thoughts List */}
           {loadingThoughts ? (
             <div className="py-8 text-center text-secondary">Loading thoughts...</div>
-          ) : thoughtsList.length === 0 ? (
+          ) : filteredThoughts.length === 0 ? (
             <div className="py-12 text-center border border-dashed border-outline-variant dark:border-[#333333] rounded-[14px]">
               <span className="material-symbols-outlined text-4xl text-outline mb-2">article</span>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
@@ -595,7 +694,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
-              {thoughtsList.map((th) => (
+              {filteredThoughts.map((th) => (
                 <div
                   key={th.id}
                   className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 space-y-3 flex items-start gap-4"
@@ -614,7 +713,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                           👤 {th.username}
                         </span>
                         <span className="font-label-sm text-xs text-secondary dark:text-[#A1A1A1] bg-surface dark:bg-[#111111] px-2 py-0.5 rounded-full border border-outline-variant/30">
-                          usr_{th.user_id}
+                          {th.user_id}
                         </span>
                       </div>
 
@@ -651,7 +750,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Contact Messages
               </h2>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                Search specifically by Identity, User ID, or Message Content.
+                Search specifically by Identity, User ID, or Message Content. Real-time updates.
               </p>
             </div>
 
@@ -670,7 +769,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
               {messagesSearch && (
                 <button
                   onClick={() => setMessagesSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary text-xs cursor-pointer"
                 >
                   Clear
                 </button>
@@ -681,7 +780,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
           {/* Messages List */}
           {loadingMessages ? (
             <div className="py-8 text-center text-secondary">Loading contact messages...</div>
-          ) : messagesList.length === 0 ? (
+          ) : filteredMessages.length === 0 ? (
             <div className="py-12 text-center border border-dashed border-outline-variant dark:border-[#333333] rounded-[14px]">
               <span className="material-symbols-outlined text-4xl text-outline mb-2">mail</span>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
@@ -690,7 +789,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
-              {messagesList.map((msg) => (
+              {filteredMessages.map((msg) => (
                 <div
                   key={msg.id}
                   className="bg-surface-container-lowest dark:bg-[#1A1A1A] border border-outline-variant dark:border-[#333333] rounded-[14px] p-6 space-y-4"
@@ -701,7 +800,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                         👤 {msg.username}
                       </span>
                       <span className="font-label-sm text-secondary dark:text-[#A1A1A1] bg-surface dark:bg-[#111111] px-2 py-0.5 rounded-full border border-outline-variant/30">
-                        {msg.user_id ? `usr_${msg.user_id}` : 'Unauthenticated'}
+                        {msg.user_id ? `ID: ${msg.user_id}` : 'Unauthenticated'}
                       </span>
                     </div>
 
@@ -765,7 +864,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
               Admin Security Settings
             </h2>
             <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-              Update your administrator account password or destroy active session.
+              Update your administrator account password in Firebase Authentication.
             </p>
           </div>
 

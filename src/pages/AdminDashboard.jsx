@@ -22,6 +22,9 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPass, setChangingPass] = useState(false);
   const [passStatus, setPassStatus] = useState({ error: '', success: '' });
+  const [broadcastContent, setBroadcastContent] = useState('');
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastStatus, setBroadcastStatus] = useState({ error: '', success: '' });
 
   useEffect(() => {
     if (!user || !user.isAdmin) return;
@@ -277,6 +280,43 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     } catch (err) {
       console.error('Error marking message as resolved:', err);
       alert('Failed to resolve message.');
+    }
+  };
+
+  const handleBroadcastMessage = async (e) => {
+    e.preventDefault();
+    setBroadcastStatus({ error: '', success: '' });
+
+    const content = broadcastContent.trim();
+    if (!content) {
+      setBroadcastStatus({ error: 'Please enter a message to publish.', success: '' });
+      return;
+    }
+
+    setBroadcasting(true);
+
+    try {
+      const res = await fetch('/api/admin/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to publish announcement.');
+      }
+
+      if (data.thought) {
+        setRawThoughts((prev) => [{ ...data.thought, user_id: data.thought.user_id || 'admin' }, ...prev]);
+      }
+
+      setBroadcastContent('');
+      setBroadcastStatus({ error: '', success: 'Announcement published to the feed.' });
+    } catch (err) {
+      console.error('Broadcast error:', err);
+      setBroadcastStatus({ error: err.message || 'Failed to publish announcement.', success: '' });
+    } finally {
+      setBroadcasting(false);
     }
   };
 
@@ -787,6 +827,46 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
               Update your administrator account password.
             </p>
           </div>
+
+          <form onSubmit={handleBroadcastMessage} className="space-y-6 border-b border-outline-variant/40 dark:border-[#333333] pb-8">
+            <div>
+              <label className="font-label-sm text-secondary dark:text-[#A1A1A1] uppercase tracking-widest block mb-2">
+                Publish Feed Announcement
+              </label>
+              <textarea
+                required
+                value={broadcastContent}
+                onChange={(e) => setBroadcastContent(e.target.value)}
+                placeholder="Write a message for the public feed..."
+                maxLength={300}
+                rows={4}
+                className="w-full bg-surface dark:bg-[#111111] border border-outline-variant dark:border-[#333333] rounded-[14px] p-4 text-primary dark:text-white focus:outline-none focus:border-primary dark:focus:border-white transition-colors"
+              />
+              <p className="mt-2 text-xs text-secondary dark:text-[#A1A1A1]">
+                {broadcastContent.length}/300 characters
+              </p>
+            </div>
+
+            {broadcastStatus.error && (
+              <p className="font-label-sm text-error dark:text-red-400">
+                ✕ {broadcastStatus.error}
+              </p>
+            )}
+
+            {broadcastStatus.success && (
+              <p className="font-label-sm text-emerald-600 dark:text-emerald-400 font-medium">
+                ✓ {broadcastStatus.success}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={broadcasting}
+              className="bg-primary dark:bg-[#FAFAF8] text-on-primary dark:text-[#111111] font-label-md px-8 py-3 rounded-[14px] hover:opacity-80 transition-opacity disabled:opacity-50 cursor-pointer"
+            >
+              {broadcasting ? 'Publishing...' : 'Publish Announcement'}
+            </button>
+          </form>
 
           <form onSubmit={handleChangePassword} className="space-y-6">
             <div>

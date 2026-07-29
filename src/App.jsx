@@ -39,30 +39,23 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        const storedAdmin = localStorage.getItem('ithink_admin_user');
-        const restoredUser = getUserSession();
-
-        if (storedAdmin) {
-          const parsedAdmin = JSON.parse(storedAdmin);
-          setUser(parsedAdmin);
-          setActivePage('admin');
-        } else if (restoredUser) {
-          setUser(restoredUser);
-          if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
-            setIsAdminLoginOpen(true);
-          } else {
-            setActivePage('home');
-          }
-        } else {
-          // Try backend session fallback
-          try {
-            const res = await fetch('/api/auth/me');
-            const data = await res.json();
-            if (data.authenticated && data.user) {
-              setUser(data.user);
+        try {
+          const res = await fetch('/api/auth/me');
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            setUser(data.user);
+            if (data.user.isAdmin) {
+              setActivePage('admin');
+            } else {
               saveUserSession(data.user);
-              if (data.user.isAdmin) {
-                setActivePage('admin');
+              setActivePage('home');
+            }
+          } else {
+            const restoredUser = getUserSession();
+            if (restoredUser) {
+              setUser(restoredUser);
+              if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+                setIsAdminLoginOpen(true);
               } else {
                 setActivePage('home');
               }
@@ -73,7 +66,17 @@ export default function App() {
               }
               setActivePage('identity');
             }
-          } catch (_) {
+          }
+        } catch (_) {
+          const restoredUser = getUserSession();
+          if (restoredUser) {
+            setUser(restoredUser);
+            if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+              setIsAdminLoginOpen(true);
+            } else {
+              setActivePage('home');
+            }
+          } else {
             setUser(null);
             if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
               setIsAdminLoginOpen(true);
@@ -116,7 +119,6 @@ export default function App() {
 
   const handleAdminLoggedIn = (adminUser) => {
     setUser(adminUser);
-    localStorage.setItem('ithink_admin_user', JSON.stringify(adminUser));
     setActivePage('admin');
   };
 
@@ -127,7 +129,6 @@ export default function App() {
 
     setUser(null);
     clearUserSession();
-    localStorage.removeItem('ithink_admin_user');
 
     if (window.location.hash === '#admin') {
       window.history.replaceState(null, '', window.location.pathname);

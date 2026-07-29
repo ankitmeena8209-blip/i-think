@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import db, { initDb } from './db/schema.js';
+import { getAdminCredentials } from './routes/auth.js';
 import { validateWord, containsProfanity, sanitizeText } from './utils/moderation.js';
 
 console.log('--- Starting Comprehensive Automated Admin Panel Tests for i think ---');
@@ -46,6 +47,11 @@ async function runTests() {
 
     const validPasswordMatch = bcrypt.compareSync(adminPassword, adminUser.password_hash);
     assert(validPasswordMatch === true, 'Admin initial password verifies correctly against bcrypt hash');
+
+    const credentials = getAdminCredentials();
+    assert(Boolean(credentials.username), 'Admin credentials helper exposes configured username');
+    assert(Boolean(credentials.passwordHash), 'Admin credentials helper produces a bcrypt password hash');
+    assert(bcrypt.compareSync(adminPassword, credentials.passwordHash), 'Admin credentials helper verifies env password against bcrypt hash');
   } catch (err) {
     console.error('Admin security test error:', err);
   }

@@ -37,7 +37,6 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
         isAdmin: true
       };
 
-      localStorage.setItem('ithink_admin_user', JSON.stringify(adminUserObj));
       onLoginSuccess(adminUserObj);
       setUsername('');
       setPassword('');

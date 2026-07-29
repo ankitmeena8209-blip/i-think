@@ -1,7 +1,5 @@
 import express from 'express';
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import { getSessionUser } from './auth.js';
+import { getSessionUser, verifyAdminPassword, setSessionCookie } from './auth.js';
 import { getSupabaseClient } from '../utils/supabase.js';
 
 const router = express.Router();
@@ -294,17 +292,55 @@ router.post('/change-password', async (req, res) => {
     return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
   }
 
-  const adminUserEnv = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || '';
-  const adminPassEnv = process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || '';
-
-  if (currentPassword !== adminPassEnv) {
+  if (!verifyAdminPassword(currentPassword)) {
     return res.status(400).json({ error: 'Incorrect current password.' });
   }
 
-  const newSessionToken = Buffer.from(JSON.stringify({ id: `admin_${adminUserEnv}`, username: adminUserEnv, isAdmin: true })).toString('base64');
-  res.cookie('ithink_session', newSessionToken, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000, path: '/' });
+  process.env.ADMIN_PASS = newPassword;
+  process.env.ADMIN_PASSWORD = newPassword;
 
-  return res.json({ success: true, message: 'Password updated successfully.' });
+  setSessionCookie(res, {
+    id: `admin_${process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'admin'}`,
+    username: process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'admin',
+    isAdmin: true
+  });
+
+  return res.json({ success: true, message: 'Admin password updated successfully for this deployment instance.' });
+});
+
+router.post('/broadcast', async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: 'Supabase is not configured.' });
+  }
+
+  const { content } = req.body || {};
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    return res.status(400).json({ error: 'Announcement content is required.' });
+  }
+
+  const trimmedContent = content.trim();
+  if (trimmedContent.length > 300) {
+    return res.status(400).json({ error: 'Announcement exceeds the maximum length of 300 characters.' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('thoughts')
+      .insert([{
+        user_id: req.adminUser?.id || 'admin',
+        username: req.adminUser?.username || 'Admin',
+        content: trimmedContent
+      }])
+      .select('id, username, content, created_at')
+      .single();
+
+    if (error) throw error;
+
+    return res.json({ success: true, thought: data });
+  } catch (err) {
+    console.error('Error broadcasting admin announcement:', err);
+    return res.status(500).json({ error: 'Failed to publish announcement.' });
+  }
 });
 
 export default router;

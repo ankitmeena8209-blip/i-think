@@ -163,8 +163,13 @@ export async function initDb() {
  * Automatically updates old admin username and password hash in DB if environment variables change.
  */
 export async function seedInitialAdmin() {
-  const adminUsername = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'im_ankiit';
-  const adminPassword = process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || '82090760107200ankitbeingfrzi';
+  const adminUsername = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || '';
+  const adminPassword = process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || '';
+
+  if (!adminUsername || !adminPassword) {
+    console.warn('[i think DB] Admin credentials were not configured via environment variables. Skipping admin seeding.');
+    return;
+  }
 
   const newHash = bcrypt.hashSync(adminPassword, 10);
 

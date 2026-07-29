@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-import { auth } from '../lib/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [username, setUsername] = useState('');
@@ -19,47 +17,25 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
     setErrorMsg('');
 
     try {
-      // Map username to internal admin email format for Firebase Auth
-      const adminEmail = `${cleanUsername.toLowerCase()}@i-think-5e76d.firebaseapp.com`;
-      let firebaseUser = null;
+      // Authenticate against the backend Express server
+      const res = await fetch('/api/auth/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cleanUsername, password })
+      });
 
-      try {
-        const userCred = await signInWithEmailAndPassword(auth, adminEmail, password);
-        firebaseUser = userCred.user;
-      } catch (authError) {
-        // If account does not exist yet on initial Firebase setup, initialize admin in Firebase Auth
-        if (
-          authError.code === 'auth/user-not-found' ||
-          authError.code === 'auth/invalid-credential'
-        ) {
-          try {
-            const newCred = await createUserWithEmailAndPassword(auth, adminEmail, password);
-            firebaseUser = newCred.user;
-          } catch (createErr) {
-            console.error('Firebase Auth admin creation error:', createErr);
-            throw authError; // throw original error if password mismatch or creation failed
-          }
-        } else {
-          throw authError;
-        }
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || 'Invalid administrator credentials.');
+        return;
       }
 
       const adminUserObj = {
-        id: firebaseUser ? firebaseUser.uid : 'admin_1',
+        id: data.user?.id || 'admin_1',
         username: cleanUsername,
         isAdmin: true
       };
-
-      // Also call server backend if running
-      try {
-        await fetch('/api/auth/admin-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: cleanUsername, password })
-        });
-      } catch (err) {
-        // Non-blocking
-      }
 
       localStorage.setItem('ithink_admin_user', JSON.stringify(adminUserObj));
       onLoginSuccess(adminUserObj);
@@ -68,13 +44,7 @@ export default function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
       onClose();
     } catch (err) {
       console.error('Admin login error:', err);
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setErrorMsg('Invalid administrator credentials.');
-      } else if (err.code === 'auth/too-many-requests') {
-        setErrorMsg('Too many failed attempts. Please try again later.');
-      } else {
-        setErrorMsg('Invalid administrator credentials.');
-      }
+      setErrorMsg('Unable to connect to the server. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -1,20 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { db, auth } from '../lib/firebase';
-import {
-  collection,
-  onSnapshot,
-  doc,
-  deleteDoc,
-  updateDoc,
-  writeBatch
-} from 'firebase/firestore';
-import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 
 export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdminLogin }) {
-  // Navigation Tabs: 'dashboard' | 'users' | 'thoughts' | 'messages' | 'settings'
   const [activeTab, setActiveTab] = useState('dashboard');
-
-  // Real-time Collections State from Firestore
   const [rawUsers, setRawUsers] = useState([]);
   const [rawThoughts, setRawThoughts] = useState([]);
   const [rawMessages, setRawMessages] = useState([]);
@@ -36,112 +23,63 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
   const [changingPass, setChangingPass] = useState(false);
   const [passStatus, setPassStatus] = useState({ error: '', success: '' });
 
-  // 1. Real-time Firestore Listeners
   useEffect(() => {
     if (!user || !user.isAdmin) return;
 
-    // Listen to Users
-    const unsubscribeUsers = onSnapshot(
-      collection(db, 'users'),
-      (snapshot) => {
-        const list = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          let createdAt = new Date().toISOString();
-          if (data.created_at) {
-            createdAt = data.created_at;
-          } else if (data.createdAt?.toDate) {
-            createdAt = data.createdAt.toDate().toISOString();
-          }
+    const loadAdminData = async () => {
+      try {
+        const [usersRes, thoughtsRes, messagesRes] = await Promise.all([
+          fetch('/api/admin/users'),
+          fetch('/api/admin/thoughts'),
+          fetch('/api/admin/contact-messages')
+        ]);
 
-          return {
-            id: docSnap.id,
-            username: data.username || 'Anonymous',
-            word1: data.word1 || '',
-            word2: data.word2 || '',
-            is_admin: data.is_admin || 0,
-            created_at: createdAt,
-            ip_address: data.ip_address || '127.0.0.1'
-          };
-        });
-        setRawUsers(list);
+        const [usersPayload, thoughtsPayload, messagesPayload] = await Promise.all([
+          usersRes.json(),
+          thoughtsRes.json(),
+          messagesRes.json()
+        ]);
+
+        setRawUsers((usersPayload.users || []).map((row) => ({
+          id: row.id,
+          username: row.username || 'Anonymous',
+          word1: row.word1 || '',
+          word2: row.word2 || '',
+          is_admin: row.is_admin || 0,
+          created_at: row.created_at,
+          ip_address: row.ip_address || '127.0.0.1'
+        })));
+
+        setRawThoughts((thoughtsPayload.thoughts || []).map((row) => ({
+          id: row.id,
+          user_id: row.user_id || row.userId || null,
+          username: row.username || 'Anonymous',
+          content: row.content || '',
+          created_at: row.created_at,
+          ip_address: row.ip_address || '127.0.0.1'
+        })));
+
+        setRawMessages((messagesPayload.messages || []).map((row) => ({
+          id: row.id,
+          user_id: row.user_id || row.userId || null,
+          username: row.username || 'Anonymous Stranger',
+          message: row.message || '',
+          status: row.status || 'pending_retry',
+          delivered_to_telegram: row.delivered_to_telegram || row.deliveredToTelegram || 0,
+          user_agent: row.user_agent || row.userAgent || 'Unknown',
+          ip_address: row.ip_address || '127.0.0.1',
+          created_at: row.created_at
+        })));
+      } catch (err) {
+        console.error('Error loading admin data:', err);
+      } finally {
         setLoadingUsers(false);
-      },
-      (err) => {
-        console.error('Error listening to users collection:', err);
-        setLoadingUsers(false);
-      }
-    );
-
-    // Listen to Thoughts
-    const unsubscribeThoughts = onSnapshot(
-      collection(db, 'thoughts'),
-      (snapshot) => {
-        const list = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          let createdAt = new Date().toISOString();
-          if (data.created_at) {
-            createdAt = data.created_at;
-          } else if (data.createdAt?.toDate) {
-            createdAt = data.createdAt.toDate().toISOString();
-          }
-
-          return {
-            id: docSnap.id,
-            user_id: data.userId || data.user_id || docSnap.id,
-            username: data.username || 'Anonymous',
-            content: data.content || '',
-            created_at: createdAt,
-            ip_address: data.ip_address || '127.0.0.1'
-          };
-        });
-        setRawThoughts(list);
         setLoadingThoughts(false);
-      },
-      (err) => {
-        console.error('Error listening to thoughts collection:', err);
-        setLoadingThoughts(false);
-      }
-    );
-
-    // Listen to Contact Messages
-    const unsubscribeMessages = onSnapshot(
-      collection(db, 'contact_messages'),
-      (snapshot) => {
-        const list = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          let createdAt = new Date().toISOString();
-          if (data.created_at) {
-            createdAt = data.created_at;
-          } else if (data.createdAt?.toDate) {
-            createdAt = data.createdAt.toDate().toISOString();
-          }
-
-          return {
-            id: docSnap.id,
-            user_id: data.userId || data.user_id || null,
-            username: data.username || 'Anonymous Stranger',
-            message: data.message || '',
-            status: data.status || 'pending_retry',
-            delivered_to_telegram: data.deliveredToTelegram || data.delivered_to_telegram || 0,
-            user_agent: data.userAgent || data.user_agent || 'Unknown',
-            ip_address: data.ip_address || '127.0.0.1',
-            created_at: createdAt
-          };
-        });
-        setRawMessages(list);
-        setLoadingMessages(false);
-      },
-      (err) => {
-        console.error('Error listening to contact_messages collection:', err);
         setLoadingMessages(false);
       }
-    );
-
-    return () => {
-      unsubscribeUsers();
-      unsubscribeThoughts();
-      unsubscribeMessages();
     };
+
+    loadAdminData();
   }, [user]);
 
   // Derived Stats Overview
@@ -243,47 +181,27 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
 
   // --- ACTIONS ---
 
-  // User Actions
   const handleDeleteUser = async (userId, username) => {
-    if (
-      !window.confirm(
-        `Are you sure you want to permanently delete identity "${username}" and all associated thoughts?`
-      )
-    )
-      return;
+    if (!window.confirm(`Are you sure you want to permanently delete identity "${username}" and all associated thoughts?`)) return;
 
     try {
-      // Delete user document from Firestore
-      await deleteDoc(doc(db, 'users', userId));
-
-      // Batch delete thoughts for this user
-      const batch = writeBatch(db);
-      const userThoughts = rawThoughts.filter(
-        (t) => t.username === username || String(t.user_id) === String(userId)
-      );
-      userThoughts.forEach((t) => {
-        batch.delete(doc(db, 'thoughts', t.id));
-      });
-      await batch.commit();
+      const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete user');
+      setRawUsers((prev) => prev.filter((item) => item.id !== userId));
+      setRawThoughts((prev) => prev.filter((item) => String(item.user_id) !== String(userId)));
     } catch (err) {
-      console.error('Error deleting user from Firestore:', err);
+      console.error('Error deleting user:', err);
       alert('Failed to delete user.');
     }
   };
 
   const handleDeleteAllUserThoughts = async (userId, username) => {
-    if (!window.confirm(`Are you sure you want to delete ALL thoughts published by "${username}"?`))
-      return;
+    if (!window.confirm(`Are you sure you want to delete ALL thoughts published by "${username}"?`)) return;
 
     try {
-      const batch = writeBatch(db);
-      const userThoughts = rawThoughts.filter(
-        (t) => t.username === username || String(t.user_id) === String(userId)
-      );
-      userThoughts.forEach((t) => {
-        batch.delete(doc(db, 'thoughts', t.id));
-      });
-      await batch.commit();
+      const res = await fetch(`/api/admin/users/${userId}/thoughts`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete user thoughts');
+      setRawThoughts((prev) => prev.filter((item) => String(item.user_id) !== String(userId)));
     } catch (err) {
       console.error('Error deleting thoughts for user:', err);
       alert('Failed to delete user thoughts.');
@@ -295,28 +213,31 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     if (!window.confirm('Permanently delete this thought?')) return;
 
     try {
-      await deleteDoc(doc(db, 'thoughts', thoughtId));
+      const res = await fetch(`/api/admin/thoughts/${thoughtId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete thought');
+      setRawThoughts((prev) => prev.filter((item) => item.id !== thoughtId));
       setSelectedThoughtIds((prev) => prev.filter((id) => id !== thoughtId));
     } catch (err) {
-      console.error('Error deleting thought from Firestore:', err);
+      console.error('Error deleting thought:', err);
       alert('Failed to delete thought.');
     }
   };
 
   const handleBulkDeleteThoughts = async () => {
     if (selectedThoughtIds.length === 0) return;
-    if (!window.confirm(`Permanently delete ${selectedThoughtIds.length} selected thoughts?`))
-      return;
+    if (!window.confirm(`Permanently delete ${selectedThoughtIds.length} selected thoughts?`)) return;
 
     try {
-      const batch = writeBatch(db);
-      selectedThoughtIds.forEach((id) => {
-        batch.delete(doc(db, 'thoughts', id));
+      const res = await fetch('/api/admin/thoughts/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedThoughtIds })
       });
-      await batch.commit();
+      if (!res.ok) throw new Error('Failed to bulk delete thoughts');
+      setRawThoughts((prev) => prev.filter((item) => !selectedThoughtIds.includes(item.id)));
       setSelectedThoughtIds([]);
     } catch (err) {
-      console.error('Error bulk deleting thoughts from Firestore:', err);
+      console.error('Error bulk deleting thoughts:', err);
       alert('Failed to bulk delete thoughts.');
     }
   };
@@ -340,25 +261,26 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     if (!window.confirm('Permanently delete this contact message?')) return;
 
     try {
-      await deleteDoc(doc(db, 'contact_messages', msgId));
+      const res = await fetch(`/api/admin/contact-messages/${msgId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete message');
+      setRawMessages((prev) => prev.filter((item) => item.id !== msgId));
     } catch (err) {
-      console.error('Error deleting contact message from Firestore:', err);
+      console.error('Error deleting contact message:', err);
       alert('Failed to delete contact message.');
     }
   };
 
   const handleResolveMessage = async (msgId) => {
     try {
-      await updateDoc(doc(db, 'contact_messages', msgId), {
-        status: 'resolved'
-      });
+      const res = await fetch(`/api/admin/contact-messages/${msgId}/resolve`, { method: 'PATCH' });
+      if (!res.ok) throw new Error('Failed to resolve message');
+      setRawMessages((prev) => prev.map((item) => item.id === msgId ? { ...item, status: 'resolved' } : item));
     } catch (err) {
       console.error('Error marking message as resolved:', err);
       alert('Failed to resolve message.');
     }
   };
 
-  // Password Change Handler using Firebase Auth
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPassStatus({ error: '', success: '' });
@@ -381,24 +303,23 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     setChangingPass(true);
 
     try {
-      const currentUser = auth.currentUser;
-      if (currentUser && currentUser.email) {
-        const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
-        await reauthenticateWithCredential(currentUser, credential);
-        await updatePassword(currentUser, newPassword);
+      const res = await fetch('/api/admin/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to update password.');
       }
 
-      setPassStatus({ error: '', success: 'Password updated successfully in Firebase Auth.' });
+      setPassStatus({ error: '', success: 'Password updated successfully.' });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
       console.error('Password change error:', err);
-      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setPassStatus({ error: 'Incorrect current password.', success: '' });
-      } else {
-        setPassStatus({ error: err.message || 'Failed to update password.', success: '' });
-      }
+      setPassStatus({ error: err.message || 'Failed to update password.', success: '' });
     } finally {
       setChangingPass(false);
     }
@@ -466,7 +387,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
       {activeTab === 'dashboard' && (
         <section className="space-y-8">
           <h2 className="font-headline-md text-headline-md text-primary dark:text-white">
-            System Metrics Overview (Real-time Firestore)
+            System Metrics Overview
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -527,7 +448,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Users Management
               </h2>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                Search specifically by Identity (username) or User ID. Real-time updates from Firestore.
+                Search specifically by Identity (username) or User ID.
               </p>
             </div>
 
@@ -630,7 +551,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Thoughts Management
               </h2>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                Search specifically by Identity, Thought content, or User ID. Real-time updates.
+                Search specifically by Identity, Thought content, or User ID.
               </p>
             </div>
 
@@ -750,7 +671,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
                 Contact Messages
               </h2>
               <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-                Search specifically by Identity, User ID, or Message Content. Real-time updates.
+                Search specifically by Identity, User ID, or Message Content.
               </p>
             </div>
 
@@ -864,7 +785,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
               Admin Security Settings
             </h2>
             <p className="font-body-md text-secondary dark:text-[#A1A1A1]">
-              Update your administrator account password in Firebase Authentication.
+              Update your administrator account password.
             </p>
           </div>
 

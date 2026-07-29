@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 import { validateWord, capitalizeWord, descriptiveWords, natureWords } from '../lib/moderation';
 import { generateUserId, saveUserSession } from '../lib/userSession';
 
@@ -8,7 +7,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
   const [word1, setWord1] = useState('');
   const [word2, setWord2] = useState('');
   const [checking, setChecking] = useState(false);
-  const [availability, setAvailability] = useState(null); // { available: boolean, reason?: string, suggestions?: [] }
+  const [availability, setAvailability] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -16,20 +15,41 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
   const formattedW2 = capitalizeWord(word2);
   const previewUsername = `${formattedW1}${formattedW2}`;
 
-  // Helper to check if username exists in Firestore
-  const isUsernameTakenInFirestore = async (username) => {
+  const isUsernameTaken = async (username) => {
+    if (!supabase) {
+      try {
+        const res = await fetch('/api/identity/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ word1: username.slice(0, -1), word2: username.slice(-1) })
+        });
+        const data = await res.json();
+        return !data.available;
+      } catch (err) {
+        console.error('Unexpected error checking username:', err);
+        return false;
+      }
+    }
+
     try {
-      const q = query(collection(db, 'users'), where('username', '==', username));
-      const snapshot = await getDocs(q);
-      return !snapshot.empty;
+      const { data, error } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', username)
+        .limit(1);
+      if (error) {
+        console.error('Error querying users for username:', error);
+        return false;
+      }
+      return data && data.length > 0;
     } catch (err) {
-      console.error('Error querying Firestore for username:', err);
+      console.error('Unexpected error checking username:', err);
       return false;
     }
   };
 
-  // Helper to generate N available suggestions
-  const generateSuggestionsFirestore = async (requestedW1, requestedW2, count = 6) => {
+  // Generate N available username suggestions
+  const generateSuggestions = async (requestedW1, requestedW2, count = 6) => {
     const suggestions = [];
     let attempts = 0;
 
@@ -52,7 +72,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
       w2 = capitalizeWord(w2);
       const combined = `${w1}${w2}`;
 
-      const taken = await isUsernameTakenInFirestore(combined);
+      const taken = await isUsernameTaken(combined);
       if (!taken && !suggestions.some((s) => s.username === combined)) {
         suggestions.push({ word1: w1, word2: w2, username: combined });
       }
@@ -61,7 +81,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
     return suggestions;
   };
 
-  // Real-time DB check with debounce
+  // Debounced availability check
   const checkAvailability = useCallback(async (w1, w2) => {
     const v1 = validateWord(w1);
     if (!v1.valid) {
@@ -82,10 +102,10 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
 
     try {
       const username = `${w1}${w2}`;
-      const taken = await isUsernameTakenInFirestore(username);
+      const taken = await isUsernameTaken(username);
 
       if (taken) {
-        const suggestions = await generateSuggestionsFirestore(w1, w2, 6);
+        const suggestions = await generateSuggestions(w1, w2, 6);
         setAvailability({
           available: false,
           reason: 'This identity is already taken.',
@@ -93,12 +113,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
           suggestions
         });
       } else {
-        setAvailability({
-          available: true,
-          username,
-          word1: w1,
-          word2: w2
-        });
+        setAvailability({ available: true, username, word1: w1, word2: w2 });
       }
     } catch (err) {
       console.error('Error checking availability:', err);
@@ -120,7 +135,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
     return () => clearTimeout(timer);
   }, [formattedW1, formattedW2, checkAvailability]);
 
-  // Generate for me handler
+  // Generate a random available identity
   const handleGenerate = async () => {
     setChecking(true);
     setErrorMsg('');
@@ -134,7 +149,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
         const w2 = capitalizeWord(natureWords[Math.floor(Math.random() * natureWords.length)]);
         const username = `${w1}${w2}`;
 
-        const taken = await isUsernameTakenInFirestore(username);
+        const taken = await isUsernameTaken(username);
         if (!taken) {
           found = { word1: w1, word2: w2 };
           break;
@@ -155,7 +170,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
     }
   };
 
-  // Submit / Continue handler
+  // Submit / create identity
   const handleContinue = async () => {
     if (!formattedW1 || !formattedW2 || !availability?.available) return;
 
@@ -164,38 +179,20 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
 
     try {
       const username = `${formattedW1}${formattedW2}`;
-      const taken = await isUsernameTakenInFirestore(username);
 
+      // Final uniqueness check before writing
+      const taken = await isUsernameTaken(username);
       if (taken) {
-        const suggestions = await generateSuggestionsFirestore(formattedW1, formattedW2, 6);
+        const suggestions = await generateSuggestions(formattedW1, formattedW2, 6);
         setAvailability({ available: false, reason: 'This identity is already taken.', suggestions });
         setErrorMsg('This identity is already taken.');
         setSubmitting(false);
         return;
       }
 
-      // Generate permanent unique User ID
       const userId = generateUserId();
-      const nowIso = new Date().toISOString();
 
-      // Write document using setDoc with merge: true for document creation safety
-      await setDoc(
-        doc(db, 'users', userId),
-        {
-          id: userId,
-          username,
-          word1: formattedW1,
-          word2: formattedW2,
-          is_admin: 0,
-          created_at: nowIso,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          ip_address: '127.0.0.1'
-        },
-        { merge: true }
-      );
-
-      const userObj = {
+      let userObj = {
         id: userId,
         username,
         word1: formattedW1,
@@ -203,18 +200,43 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
         isAdmin: false
       };
 
-      // Save user identity to persistent cookie + localStorage
-      saveUserSession(userObj);
+      if (supabase) {
+        const { error: insertError } = await supabase
+          .from('users')
+          .insert([{
+            id: userId,
+            username,
+            word1: formattedW1,
+            word2: formattedW2,
+            is_admin: 0,
+            ip_address: '127.0.0.1'
+          }]);
 
-      // Fallback backend session creation
-      try {
-        await fetch('/api/identity/create', {
+        if (insertError) {
+          console.error('Error creating identity in Supabase:', insertError);
+          setErrorMsg('Failed to create identity. Please try again.');
+          return;
+        }
+      } else {
+        const res = await fetch('/api/identity/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ word1: formattedW1, word2: formattedW2 })
         });
-      } catch (e) {}
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          throw new Error(data.error || 'Failed to create identity.');
+        }
+        userObj = {
+          id: data.user?.id || userId,
+          username: data.user?.username || username,
+          word1: data.user?.word1 || formattedW1,
+          word2: data.user?.word2 || formattedW2,
+          isAdmin: false
+        };
+      }
 
+      saveUserSession(userObj);
       onIdentityCreated(userObj);
     } catch (err) {
       console.error('Error creating identity:', err);

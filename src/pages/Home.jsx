@@ -52,9 +52,38 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
       const from = currentPage * PAGE_LIMIT;
       const to = from + PAGE_LIMIT; // we fetch PAGE_LIMIT + 1 to detect if there are more
 
+      if (!supabase) {
+        const res = await fetch(`/api/thoughts?sort=${sort}&limit=${PAGE_LIMIT + 1}`);
+        const payload = await res.json();
+        const items = (payload.thoughts || []).map((row) => ({
+          id: row.id,
+          username: row.username || 'Anonymous',
+          content: row.content || '',
+          created_at: row.created_at,
+          contentLength: (row.content || '').length,
+        }));
+
+        if (sort === 'top') {
+          items.sort((a, b) => b.contentLength - a.contentLength);
+        }
+
+        if (reset) {
+          setThoughts(items);
+          setPage(1);
+        } else {
+          setThoughts((prev) => [...prev, ...items]);
+          setPage((p) => p + 1);
+        }
+
+        setHasMore(items.length > PAGE_LIMIT);
+        if (reset) setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
+
       let query = supabase
         .from('thoughts')
-        .select('id, username, thought, created_at')
+        .select('id, username, content, created_at')
         .range(from, to);
 
       if (sort === 'latest') {
@@ -75,9 +104,9 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
       const items = (fetchedMore ? data.slice(0, PAGE_LIMIT) : data).map((row) => ({
         id: row.id,
         username: row.username || 'Anonymous',
-        content: row.thought || '',
+        content: row.content || '',
         created_at: row.created_at,
-        contentLength: (row.thought || '').length,
+        contentLength: (row.content || '').length,
       }));
 
       if (sort === 'top') {
@@ -138,10 +167,37 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
     try {
       const sanitized = sanitizeText(trimmed);
 
+      if (!supabase) {
+        const res = await fetch('/api/thoughts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: sanitized })
+        });
+        const payload = await res.json();
+        if (!res.ok || payload.error) {
+          throw new Error(payload.error || 'Failed to publish thought.');
+        }
+
+        const newThought = {
+          id: payload.thought?.id,
+          username: payload.thought?.username || user.username,
+          content: payload.thought?.content || sanitized,
+          created_at: payload.thought?.created_at,
+          contentLength: (payload.thought?.content || sanitized).length,
+        };
+
+        setThoughtInput('');
+        setThoughts((prev) => sort === 'latest' ? [newThought, ...prev] : [...prev, newThought]);
+        setPublishSuccess('Your thought has been published!');
+        if (successTimerRef.current) clearTimeout(successTimerRef.current);
+        successTimerRef.current = setTimeout(() => setPublishSuccess(''), 3000);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('thoughts')
-        .insert([{ username: user.username, thought: sanitized }])
-        .select('id, username, thought, created_at')
+        .insert([{ user_id: user.id || null, username: user.username, content: sanitized }])
+        .select('id, username, content, created_at')
         .single();
 
       if (error) {
@@ -153,9 +209,9 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
       const newThought = {
         id: data.id,
         username: data.username,
-        content: data.thought,
+        content: data.content,
         created_at: data.created_at,
-        contentLength: (data.thought || '').length,
+        contentLength: (data.content || '').length,
       };
 
       setThoughtInput('');

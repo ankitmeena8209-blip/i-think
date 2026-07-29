@@ -3,8 +3,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import db from '../db/schema.js';
 import { validateWord, capitalizeWord } from '../utils/moderation.js';
+import { getSupabaseClient } from '../utils/supabase.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,11 +17,13 @@ const natureWords = JSON.parse(
 );
 
 const router = express.Router();
+const supabase = getSupabaseClient();
 
-// Helper to check if a username exists in DB
 async function isUsernameTaken(username) {
-  const row = await db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-  return !!row;
+  if (!supabase) return false;
+  const { data, error } = await supabase.from('users').select('id').eq('username', username).limit(1);
+  if (error) throw error;
+  return Boolean(data?.length);
 }
 
 // Helper to generate N unique available suggestions
@@ -143,21 +145,26 @@ router.post('/create', async (req, res) => {
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   try {
-    const result = await db.prepare(`
-      INSERT INTO users (username, word1, word2, ip_address)
-      VALUES (?, ?, ?, ?)
-    `).run(username, w1, w2, clientIp);
+    const userId = `usr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    const userId = result.lastInsertRowid;
+    if (supabase) {
+      const { error } = await supabase.from('users').insert([{
+        id: userId,
+        username,
+        word1: w1,
+        word2: w2,
+        is_admin: 0,
+        ip_address: clientIp
+      }]);
+
+      if (error) {
+        throw error;
+      }
+    }
+
     const sessionToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
 
-    await db.prepare(`
-      INSERT INTO sessions (token, user_id, expires_at)
-      VALUES (?, ?, ?)
-    `).run(sessionToken, userId, expiresAt);
-
-    // Set secure HttpOnly cookie
     res.cookie('ithink_session', sessionToken, {
       httpOnly: true,
       sameSite: 'lax',

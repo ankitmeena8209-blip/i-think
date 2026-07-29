@@ -1,10 +1,11 @@
 import express from 'express';
-import db from '../db/schema.js';
 import { getSessionUser } from './auth.js';
 import { checkRateLimit } from '../utils/moderation.js';
 import { sendTelegramContactNotification } from '../utils/telegram.js';
+import { getSupabaseClient } from '../utils/supabase.js';
 
 const router = express.Router();
+const supabase = getSupabaseClient();
 
 // POST /api/contact
 router.post('/', async (req, res) => {
@@ -43,22 +44,26 @@ router.post('/', async (req, res) => {
     let messageId = Date.now();
 
     try {
-      const duplicate = await db.prepare(`
-        SELECT id FROM contact_messages 
-        WHERE (user_id = ? OR ip_address = ?) AND message = ? AND created_at > datetime('now', '-5 minutes')
-      `).get(userId || -1, clientIp, trimmedMessage);
+      const { data, error } = await supabase
+        .from('contact_messages')
+        .insert([{
+          user_id: userId,
+          username,
+          message: trimmedMessage,
+          status: 'pending_retry',
+          delivered_to_telegram: 0,
+          user_agent: userAgent,
+          ip_address: clientIp
+        }])
+        .select('id')
+        .single();
 
-      if (duplicate) {
-        return res.status(400).json({ error: 'You have already sent this exact message recently.' });
+      if (error) {
+        throw error;
       }
 
-      const result = await db.prepare(`
-        INSERT INTO contact_messages (user_id, username, message, status, delivered_to_telegram, user_agent, ip_address)
-        VALUES (?, ?, ?, 'pending_retry', 0, ?, ?)
-      `).run(userId, username, trimmedMessage, userAgent, clientIp);
-
-      if (result && result.lastInsertRowid) {
-        messageId = result.lastInsertRowid;
+      if (data?.id) {
+        messageId = data.id;
       }
     } catch (dbErr) {
       console.warn('Backend DB insert skipped:', dbErr.message);
@@ -76,11 +81,9 @@ router.post('/', async (req, res) => {
 
     if (telegramRes.success) {
       try {
-        await db.prepare(`
-          UPDATE contact_messages 
-          SET delivered_to_telegram = 1, status = 'delivered' 
-          WHERE id = ?
-        `).run(messageId);
+        if (supabase) {
+          await supabase.from('contact_messages').update({ delivered_to_telegram: 1, status: 'delivered' }).eq('id', messageId);
+        }
       } catch (e) {}
 
       return res.json({

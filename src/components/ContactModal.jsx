@@ -1,6 +1,4 @@
 import React, { useState } from 'react';
-import { db } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function ContactModal({ isOpen, onClose, user }) {
   const [submitted, setSubmitted] = useState(false);
@@ -25,24 +23,7 @@ export default function ContactModal({ isOpen, onClose, user }) {
     setErrorMsg('');
 
     try {
-      const nowIso = new Date().toISOString();
-
-      await addDoc(collection(db, 'contact_messages'), {
-        userId: user ? (user.id || user.username) : null,
-        user_id: user ? (user.id || user.username) : null,
-        username: user ? user.username : 'Anonymous Stranger',
-        message: trimmed,
-        status: 'pending_retry',
-        deliveredToTelegram: 0,
-        delivered_to_telegram: 0,
-        userAgent: navigator.userAgent || 'Unknown Browser',
-        user_agent: navigator.userAgent || 'Unknown Browser',
-        ip_address: '127.0.0.1',
-        created_at: nowIso,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-
+      // Best-effort backend route (Telegram notification, SQLite log)
       try {
         await fetch('/api/contact', {
           method: 'POST',
@@ -50,9 +31,9 @@ export default function ContactModal({ isOpen, onClose, user }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: trimmed })
         });
-      } catch (e) {}
+      } catch (_) {}
 
-      setStatusText('Your message has been saved successfully.');
+      setStatusText('Your message has been sent successfully.');
       setSubmitted(true);
       setTimeout(() => {
         setSubmitted(false);

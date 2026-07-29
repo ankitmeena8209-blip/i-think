@@ -1,29 +1,36 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import db from '../db/schema.js';
 import { checkRateLimit } from '../utils/moderation.js';
 
 const router = express.Router();
 
+function encodeSessionPayload(payload) {
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+function decodeSessionPayload(token) {
+  if (!token) return null;
+  try {
+    const decoded = Buffer.from(token, 'base64').toString('utf8');
+    return JSON.parse(decoded);
+  } catch (err) {
+    return null;
+  }
+}
+
 // Helper to get active session user
 export async function getSessionUser(req) {
   const token = req.cookies?.ithink_session;
-  if (!token) return null;
+  const payload = decodeSessionPayload(token);
 
-  try {
-    const session = await db.prepare(`
-      SELECT s.token, s.expires_at, u.id, u.username, u.is_admin
-      FROM sessions s
-      JOIN users u ON s.user_id = u.id
-      WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')
-    `).get(token);
+  if (!payload?.id || !payload?.username) return null;
 
-    return session ? { id: session.id, username: session.username, isAdmin: !!session.is_admin } : null;
-  } catch (err) {
-    console.error('Error fetching session user:', err);
-    return null;
-  }
+  return {
+    id: payload.id,
+    username: payload.username,
+    isAdmin: Boolean(payload.isAdmin)
+  };
 }
 
 // GET /api/auth/me
@@ -47,8 +54,8 @@ router.post('/admin-login', async (req, res) => {
     });
   }
 
-  const adminUserEnv = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || 'im_ankiit';
-  const adminPassEnv = process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || '82090760107200ankitbeingfrzi';
+  const adminUserEnv = process.env.ADMIN_USER || process.env.ADMIN_USERNAME || '';
+  const adminPassEnv = process.env.ADMIN_PASS || process.env.ADMIN_PASSWORD || '';
 
   const { username, password } = req.body || {};
 
@@ -60,38 +67,17 @@ router.post('/admin-login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }
 
-  let user = await db.prepare('SELECT id, username, is_admin, password_hash FROM users WHERE is_admin = 1 OR username = ?').get(adminUserEnv);
-  const newHash = bcrypt.hashSync(adminPassEnv, 10);
-
-  if (!user) {
-    const result = await db.prepare(`
-      INSERT INTO users (username, word1, word2, is_admin, password_hash, ip_address)
-      VALUES (?, 'Admin', 'User', 1, ?, '127.0.0.1')
-    `).run(adminUserEnv, newHash);
-    user = { id: result.lastInsertRowid, username: adminUserEnv, is_admin: 1, password_hash: newHash };
-  } else {
-    // Always force update DB record to ensure old passwords in DB are overwritten with current env credentials
-    await db.prepare('UPDATE users SET username = ?, is_admin = 1, password_hash = ? WHERE id = ?').run(adminUserEnv, newHash, user.id);
-    user.username = adminUserEnv;
-    user.is_admin = 1;
-    user.password_hash = newHash;
-  }
-
-  const isPasswordValid = (password === adminPassEnv) || (user.password_hash && bcrypt.compareSync(password, user.password_hash));
+  const isPasswordValid = password === adminPassEnv;
   if (!isPasswordValid) {
     return res.status(401).json({ error: 'Invalid admin credentials.' });
   }
 
-  // Create session
-  const sessionToken = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
+  const sessionToken = encodeSessionPayload({
+    id: `admin_${adminUserEnv}`,
+    username: adminUserEnv,
+    isAdmin: true
+  });
 
-  await db.prepare(`
-    INSERT INTO sessions (token, user_id, expires_at)
-    VALUES (?, ?, ?)
-  `).run(sessionToken, user.id, expiresAt);
-
-  // Set secure HttpOnly cookie
   res.cookie('ithink_session', sessionToken, {
     httpOnly: true,
     sameSite: 'lax',
@@ -101,16 +87,12 @@ router.post('/admin-login', async (req, res) => {
 
   return res.json({
     success: true,
-    user: { id: user.id, username: user.username, isAdmin: true }
+    user: { id: `admin_${adminUserEnv}`, username: adminUserEnv, isAdmin: true }
   });
 });
 
 // POST /api/auth/logout
 router.post('/logout', async (req, res) => {
-  const token = req.cookies?.ithink_session;
-  if (token) {
-    await db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-  }
   res.clearCookie('ithink_session', { httpOnly: true, sameSite: 'lax', path: '/' });
   return res.json({ success: true });
 });

@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { auth } from './lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { getUserSession, saveUserSession, clearUserSession } from './lib/userSession';
 
 import Navbar from './components/Navbar';
@@ -15,7 +13,7 @@ import Privacy from './pages/Privacy';
 import AdminDashboard from './pages/AdminDashboard';
 
 export default function App() {
-  const [activePage, setActivePage] = useState('home'); // 'home' | 'identity' | 'about' | 'rules' | 'privacy' | 'admin'
+  const [activePage, setActivePage] = useState('home');
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [isDark, setIsDark] = useState(() => {
@@ -37,18 +35,14 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Check auth session & restore persistent identity on mount
+  // Restore session on mount
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const init = async () => {
       try {
         const storedAdmin = localStorage.getItem('ithink_admin_user');
         const restoredUser = getUserSession();
 
-        if (firebaseUser && storedAdmin) {
-          const parsedAdmin = JSON.parse(storedAdmin);
-          setUser({ ...parsedAdmin, uid: firebaseUser.uid });
-          setActivePage('admin');
-        } else if (storedAdmin) {
+        if (storedAdmin) {
           const parsedAdmin = JSON.parse(storedAdmin);
           setUser(parsedAdmin);
           setActivePage('admin');
@@ -60,7 +54,7 @@ export default function App() {
             setActivePage('home');
           }
         } else {
-          // Check backend server session fallback
+          // Try backend session fallback
           try {
             const res = await fetch('/api/auth/me');
             const data = await res.json();
@@ -79,7 +73,7 @@ export default function App() {
               }
               setActivePage('identity');
             }
-          } catch (e) {
+          } catch (_) {
             setUser(null);
             if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
               setIsAdminLoginOpen(true);
@@ -88,14 +82,16 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error('Error verifying session:', err);
+        console.error('Error restoring session:', err);
         setActivePage('identity');
       } finally {
         setLoadingAuth(false);
       }
-    });
+    };
 
-    // Listen for #admin hash change
+    init();
+
+    // Listen for #admin hash
     const handleHashChange = () => {
       if (window.location.hash === '#admin') {
         setIsAdminLoginOpen(true);
@@ -105,15 +101,12 @@ export default function App() {
     window.addEventListener('popstate', handleHashChange);
 
     return () => {
-      unsubscribe();
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('popstate', handleHashChange);
     };
   }, []);
 
-  const handleToggleTheme = () => {
-    setIsDark((prev) => !prev);
-  };
+  const handleToggleTheme = () => setIsDark((prev) => !prev);
 
   const handleIdentityCreated = (newUser) => {
     setUser(newUser);
@@ -129,24 +122,17 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
-    } catch (err) {
-      console.error('Firebase signOut error:', err);
-    }
-
-    try {
       await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (err) {
-      // Non-blocking
-    } finally {
-      setUser(null);
-      clearUserSession();
+    } catch (_) {}
 
-      if (window.location.hash === '#admin') {
-        window.history.replaceState(null, '', window.location.pathname);
-      }
-      setActivePage('identity');
+    setUser(null);
+    clearUserSession();
+    localStorage.removeItem('ithink_admin_user');
+
+    if (window.location.hash === '#admin') {
+      window.history.replaceState(null, '', window.location.pathname);
     }
+    setActivePage('identity');
   };
 
   const handleNavigate = (page) => {

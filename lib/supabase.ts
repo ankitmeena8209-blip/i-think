@@ -11,7 +11,11 @@ const getEnvVar = (key: string): string | undefined => {
   return undefined;
 };
 
-const supabaseUrl = getEnvVar('NEXT_PUBLIC_SUPABASE_URL');
+// The env var may contain a trailing /rest/v1/ path – the JS SDK requires only the base project URL.
+const rawSupabaseUrl = getEnvVar('NEXT_PUBLIC_SUPABASE_URL');
+const supabaseUrl = rawSupabaseUrl
+  ? rawSupabaseUrl.replace(/\/rest\/v1\/?$/, '')
+  : undefined;
 const supabaseAnonKey = getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY');
 
 if (!supabaseUrl) {
@@ -25,8 +29,8 @@ if (!supabaseAnonKey) {
 // Create the Supabase client.
 // We fallback to placeholder strings if environment variables are not set to prevent module-load-time crashes.
 export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-anon-key'
+  supabaseUrl ?? 'https://placeholder.supabase.co',
+  supabaseAnonKey ?? 'placeholder-anon-key'
 );
 
 export default supabase;

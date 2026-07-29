@@ -1,15 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { db } from '../lib/firebase';
-import {
-  collection,
-  addDoc,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  startAfter,
-  serverTimestamp
-} from 'firebase/firestore';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '../lib/supabase';
 import { sanitizeText, containsProfanity } from '../lib/moderation';
 
 // Relative time formatter
@@ -28,122 +18,101 @@ function formatTimeAgo(dateString) {
   return `${days} day${days > 1 ? 's' : ''} ago`;
 }
 
+const PAGE_LIMIT = 15;
+
 export default function Home({ user, onRequireIdentity, onOpenContact }) {
   const [thoughtInput, setThoughtInput] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
+  const [publishSuccess, setPublishSuccess] = useState('');
 
   const [thoughts, setThoughts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [sort, setSort] = useState('latest'); // 'latest' | 'top'
-  const [lastVisibleDoc, setLastVisibleDoc] = useState(null);
+  const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const PAGE_LIMIT = 15;
+  const successTimerRef = useRef(null);
 
-  // Fetch thoughts from Firestore
-  const fetchThoughts = useCallback(async (isReset = false) => {
-    setLoading(true);
+  // ──────────────────────────────────────────────────────────────────────────
+  // Fetch thoughts from Supabase
+  // ──────────────────────────────────────────────────────────────────────────
+  const fetchThoughts = useCallback(async (reset = false) => {
+    const currentPage = reset ? 0 : page;
+    if (reset) {
+      setLoading(true);
+      setFetchError('');
+    } else {
+      setLoadingMore(true);
+    }
+
     try {
-      let q;
-      if (isReset || !lastVisibleDoc) {
-        q = query(
-          collection(db, 'thoughts'),
-          orderBy('createdAt', 'desc'),
-          limit(PAGE_LIMIT + 1)
-        );
-      } else {
-        q = query(
-          collection(db, 'thoughts'),
-          orderBy('createdAt', 'desc'),
-          startAfter(lastVisibleDoc),
-          limit(PAGE_LIMIT + 1)
-        );
+      const from = currentPage * PAGE_LIMIT;
+      const to = from + PAGE_LIMIT; // we fetch PAGE_LIMIT + 1 to detect if there are more
+
+      let query = supabase
+        .from('thoughts')
+        .select('id, username, thought, created_at')
+        .range(from, to);
+
+      if (sort === 'latest') {
+        query = query.order('created_at', { ascending: false });
+      }
+      // 'top' sort is done client-side by thought length (same behaviour as before)
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error fetching thoughts from Supabase:', error);
+        setFetchError('Failed to load thoughts. Please try refreshing the page.');
+        if (reset) setThoughts([]);
+        return;
       }
 
-      const snapshot = await getDocs(q);
-      const docs = snapshot.docs;
-
-      const fetchedMore = docs.length > PAGE_LIMIT;
-      const docItems = (fetchedMore ? docs.slice(0, PAGE_LIMIT) : docs).map((docSnap) => {
-        const data = docSnap.data();
-        let createdAtIso = new Date().toISOString();
-        if (data.created_at) {
-          createdAtIso = data.created_at;
-        } else if (data.createdAt?.toDate) {
-          createdAtIso = data.createdAt.toDate().toISOString();
-        }
-
-        return {
-          id: docSnap.id,
-          username: data.username || 'Anonymous',
-          content: data.content || '',
-          created_at: createdAtIso,
-          contentLength: (data.content || '').length,
-          _rawDoc: docSnap
-        };
-      });
+      const fetchedMore = data.length > PAGE_LIMIT;
+      const items = (fetchedMore ? data.slice(0, PAGE_LIMIT) : data).map((row) => ({
+        id: row.id,
+        username: row.username || 'Anonymous',
+        content: row.thought || '',
+        created_at: row.created_at,
+        contentLength: (row.thought || '').length,
+      }));
 
       if (sort === 'top') {
-        docItems.sort((a, b) => b.contentLength - a.contentLength);
+        items.sort((a, b) => b.contentLength - a.contentLength);
       }
 
-      if (isReset) {
-        setThoughts(docItems);
+      if (reset) {
+        setThoughts(items);
+        setPage(1);
       } else {
-        setThoughts((prev) => [...prev, ...docItems]);
+        setThoughts((prev) => [...prev, ...items]);
+        setPage((p) => p + 1);
       }
 
       setHasMore(fetchedMore);
-      if (docItems.length > 0) {
-        setLastVisibleDoc(docItems[docItems.length - 1]._rawDoc);
-      } else {
-        setLastVisibleDoc(null);
-      }
     } catch (err) {
-      console.error('Error fetching thoughts from Firestore:', err);
-
-      try {
-        const fallbackQuery = query(collection(db, 'thoughts'), limit(PAGE_LIMIT));
-        const fallbackSnapshot = await getDocs(fallbackQuery);
-        const fallbackItems = fallbackSnapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          let createdAtIso = data.created_at || new Date().toISOString();
-          if (data.createdAt?.toDate) {
-            createdAtIso = data.createdAt.toDate().toISOString();
-          }
-
-          return {
-            id: docSnap.id,
-            username: data.username || 'Anonymous',
-            content: data.content || '',
-            created_at: createdAtIso,
-            contentLength: (data.content || '').length
-          };
-        });
-
-        if (sort === 'top') {
-          fallbackItems.sort((a, b) => b.contentLength - a.contentLength);
-        } else {
-          fallbackItems.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        }
-
-        setThoughts(fallbackItems);
-        setHasMore(false);
-      } catch (fallbackErr) {
-        console.error('Fallback fetch error:', fallbackErr);
-      }
+      console.error('Unexpected error fetching thoughts:', err);
+      setFetchError('An unexpected error occurred. Please try again.');
+      if (reset) setThoughts([]);
     } finally {
-      setLoading(false);
+      if (reset) setLoading(false);
+      setLoadingMore(false);
     }
-  }, [sort, lastVisibleDoc]);
+  }, [sort, page]);
 
+  // Reset and refetch whenever sort changes
   useEffect(() => {
-    setLastVisibleDoc(null);
+    setPage(0);
     fetchThoughts(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sort]);
 
-  // Publish handler
+  // ──────────────────────────────────────────────────────────────────────────
+  // Publish a new thought to Supabase
+  // ──────────────────────────────────────────────────────────────────────────
   const handlePublish = async () => {
     if (!user) {
       onRequireIdentity();
@@ -164,39 +133,50 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
 
     setPublishing(true);
     setPublishError('');
+    setPublishSuccess('');
 
     try {
       const sanitized = sanitizeText(trimmed);
-      const nowIso = new Date().toISOString();
 
-      const docRef = await addDoc(collection(db, 'thoughts'), {
-        userId: user.id || user.username,
-        user_id: user.id || user.username,
-        username: user.username,
-        content: sanitized,
-        created_at: nowIso,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ip_address: '127.0.0.1'
-      });
+      const { data, error } = await supabase
+        .from('thoughts')
+        .insert([{ username: user.username, thought: sanitized }])
+        .select('id, username, thought, created_at')
+        .single();
 
-      const newThoughtObj = {
-        id: docRef.id,
-        username: user.username,
-        content: sanitized,
-        created_at: nowIso
+      if (error) {
+        console.error('Supabase insert error:', error);
+        setPublishError('Failed to publish thought. Please try again.');
+        return;
+      }
+
+      const newThought = {
+        id: data.id,
+        username: data.username,
+        content: data.thought,
+        created_at: data.created_at,
+        contentLength: (data.thought || '').length,
       };
 
       setThoughtInput('');
-      setThoughts((prev) => [newThoughtObj, ...prev]);
+      // Optimistically prepend to feed (works correctly when sorted by latest)
+      setThoughts((prev) =>
+        sort === 'latest' ? [newThought, ...prev] : [...prev, newThought]
+      );
 
+      // Show success message then clear it
+      setPublishSuccess('Your thought has been published!');
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => setPublishSuccess(''), 3000);
+
+      // Also fire to backend API (best-effort, failures are silently ignored)
       try {
         await fetch('/api/thoughts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: sanitized })
+          body: JSON.stringify({ content: sanitized }),
         });
-      } catch (e) {}
+      } catch (_) {}
     } catch (err) {
       console.error('Error publishing thought:', err);
       setPublishError('Failed to publish thought. Please try again.');
@@ -204,6 +184,9 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
       setPublishing(false);
     }
   };
+
+  // Cleanup success timer on unmount
+  useEffect(() => () => { if (successTimerRef.current) clearTimeout(successTimerRef.current); }, []);
 
   const handleLoadMore = () => {
     fetchThoughts(false);
@@ -235,6 +218,7 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
             onChange={(e) => {
               setThoughtInput(e.target.value);
               setPublishError('');
+              setPublishSuccess('');
             }}
             placeholder={user ? `What's on your mind, ${user.username}?` : "What's on your mind? (Create identity to publish)"}
             className="w-full bg-transparent border-none resize-none outline-none font-body-lg text-body-lg text-primary dark:text-dark-primary placeholder-outline dark:placeholder-dark-secondary p-0 focus:ring-0 transition-colors"
@@ -266,6 +250,11 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
         {publishError && (
           <p className="font-label-sm text-error dark:text-red-400 mt-2 px-2">
             {publishError}
+          </p>
+        )}
+        {publishSuccess && (
+          <p className="font-label-sm text-green-600 dark:text-green-400 mt-2 px-2">
+            {publishSuccess}
           </p>
         )}
       </section>
@@ -303,6 +292,19 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
           </div>
         </div>
 
+        {/* Feed error */}
+        {fetchError && (
+          <div className="py-6 text-center">
+            <p className="font-label-sm text-error dark:text-red-400">{fetchError}</p>
+            <button
+              onClick={() => fetchThoughts(true)}
+              className="mt-3 font-label-sm text-secondary dark:text-dark-secondary underline cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Feed List */}
         <div className="flex flex-col gap-6" id="feed-container">
           {thoughts.map((item) => (
@@ -339,7 +341,7 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
           )}
 
           {/* Empty state */}
-          {!loading && thoughts.length === 0 && (
+          {!loading && !fetchError && thoughts.length === 0 && (
             <div className="py-16 text-center border border-outline-variant dark:border-dark-border border-dashed rounded-[14px] transition-colors">
               <span className="material-symbols-outlined text-4xl text-outline dark:text-dark-secondary mb-4">
                 edit_note
@@ -351,7 +353,7 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
           )}
 
           {/* Load More Button */}
-          {!loading && hasMore && (
+          {!loading && !loadingMore && hasMore && (
             <div className="flex justify-center mt-4">
               <button
                 onClick={handleLoadMore}
@@ -359,6 +361,13 @@ export default function Home({ user, onRequireIdentity, onOpenContact }) {
               >
                 Load More Thoughts
               </button>
+            </div>
+          )}
+
+          {/* Loading more indicator */}
+          {loadingMore && (
+            <div className="py-4 text-center text-secondary dark:text-dark-secondary font-label-sm">
+              Loading more...
             </div>
           )}
         </div>

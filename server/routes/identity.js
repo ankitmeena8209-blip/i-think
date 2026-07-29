@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateWord, capitalizeWord } from '../utils/moderation.js';
 import { getSupabaseClient } from '../utils/supabase.js';
+import { encodeSessionPayload } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -145,24 +146,33 @@ router.post('/create', async (req, res) => {
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   try {
-    const userId = `usr_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    if (!supabase) {
+      return res.status(503).json({ error: 'Supabase is not configured.' });
+    }
 
-    if (supabase) {
-      const { error } = await supabase.from('users').insert([{
-        id: userId,
+    const { data: createdUser, error } = await supabase
+      .from('users')
+      .insert([{
         username,
         word1: w1,
         word2: w2,
         is_admin: 0,
         ip_address: clientIp
-      }]);
+      }])
+      .select('id, username, word1, word2')
+      .single();
 
-      if (error) {
-        throw error;
-      }
+    if (error) {
+      throw error;
     }
 
-    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const sessionToken = encodeSessionPayload({
+      id: createdUser?.id,
+      username: createdUser?.username || username,
+      word1: createdUser?.word1 || w1,
+      word2: createdUser?.word2 || w2,
+      isAdmin: false
+    });
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
 
     res.cookie('ithink_session', sessionToken, {
@@ -174,7 +184,12 @@ router.post('/create', async (req, res) => {
 
     return res.json({
       success: true,
-      user: { id: userId, username, word1: w1, word2: w2 }
+      user: {
+        id: createdUser?.id,
+        username: createdUser?.username || username,
+        word1: createdUser?.word1 || w1,
+        word2: createdUser?.word2 || w2
+      }
     });
   } catch (err) {
     console.error('Error creating user identity:', err);

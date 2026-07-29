@@ -5,11 +5,11 @@ import { checkRateLimit } from '../utils/moderation.js';
 
 const router = express.Router();
 
-function encodeSessionPayload(payload) {
+export function encodeSessionPayload(payload) {
   return Buffer.from(JSON.stringify(payload)).toString('base64');
 }
 
-function decodeSessionPayload(token) {
+export function decodeSessionPayload(token) {
   if (!token) return null;
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');

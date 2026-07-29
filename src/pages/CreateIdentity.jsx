@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { validateWord, capitalizeWord, descriptiveWords, natureWords } from '../lib/moderation';
-import { generateUserId, saveUserSession } from '../lib/userSession';
+import { saveUserSession } from '../lib/userSession';
 
 export default function CreateIdentity({ onIdentityCreated, onCancel }) {
   const [word1, setWord1] = useState('');
@@ -190,10 +190,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
         return;
       }
 
-      const userId = generateUserId();
-
       let userObj = {
-        id: userId,
         username,
         word1: formattedW1,
         word2: formattedW2,
@@ -201,22 +198,36 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
       };
 
       if (supabase) {
-        const { error: insertError } = await supabase
+        const { data: createdUser, error: insertError } = await supabase
           .from('users')
           .insert([{
-            id: userId,
             username,
             word1: formattedW1,
             word2: formattedW2,
             is_admin: 0,
             ip_address: '127.0.0.1'
-          }]);
+          }])
+          .select('id, username, word1, word2')
+          .single();
 
         if (insertError) {
           console.error('Error creating identity in Supabase:', insertError);
           setErrorMsg('Failed to create identity. Please try again.');
           return;
         }
+
+        if (!createdUser?.id) {
+          setErrorMsg('Identity was created without a user id. Please try again.');
+          return;
+        }
+
+        userObj = {
+          id: createdUser.id,
+          username: createdUser.username || username,
+          word1: createdUser.word1 || formattedW1,
+          word2: createdUser.word2 || formattedW2,
+          isAdmin: false
+        };
       } else {
         const res = await fetch('/api/identity/create', {
           method: 'POST',
@@ -228,7 +239,7 @@ export default function CreateIdentity({ onIdentityCreated, onCancel }) {
           throw new Error(data.error || 'Failed to create identity.');
         }
         userObj = {
-          id: data.user?.id || userId,
+          id: data.user?.id,
           username: data.user?.username || username,
           word1: data.user?.word1 || formattedW1,
           word2: data.user?.word2 || formattedW2,

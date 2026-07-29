@@ -78,7 +78,7 @@ export async function sendTelegramContactNotification({ username, userId, rawDat
 
   // Format metadata
   const identityName = username || 'Anonymous Stranger';
-  const displayUserId = userId ? (typeof userId === 'string' && userId.startsWith('usr_') ? userId : `usr_${userId}`) : 'N/A (Unauthenticated)';
+  const displayUserId = userId ? String(userId) : 'N/A (Unauthenticated)';
   const formattedTime = formatTelegramTime(rawDate ? new Date(rawDate) : new Date());
 
   const telegramText = `📩 New Contact Message

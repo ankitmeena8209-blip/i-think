@@ -28,14 +28,6 @@ export function removeCookie(name) {
 }
 
 /**
- * Generates a unique permanent User ID.
- */
-export function generateUserId() {
-  const rand = Math.random().toString(36).substring(2, 9);
-  return `usr_${Date.now()}_${rand}`;
-}
-
-/**
  * Saves user identity in persistent cookies and localStorage.
  */
 export function saveUserSession(userObj) {

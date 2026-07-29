@@ -117,8 +117,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
     return list.filter(
       (u) =>
         u.username.toLowerCase().includes(term) ||
-        u.id.toLowerCase().includes(term) ||
-        `usr_${u.id}`.toLowerCase().includes(term)
+        String(u.id).toLowerCase().includes(term)
     );
   }, [rawUsers, usersSearch]);
 

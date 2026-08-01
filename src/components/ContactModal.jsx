@@ -23,17 +23,36 @@ export default function ContactModal({ isOpen, onClose, user }) {
     setErrorMsg('');
 
     try {
-      // Best-effort backend route (Telegram notification, SQLite log)
+      let responseOk = false;
+      let responseMessage = 'Your message has been sent successfully.';
+
       try {
-        await fetch('/api/contact', {
+        const res = await fetch('/api/contact', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: trimmed })
         });
-      } catch (_) {}
 
-      setStatusText('Your message has been sent successfully.');
+        if (res.ok) {
+          const data = await res.json();
+          responseOk = true;
+          // Use the server's actual status message (e.g. "saved" when Telegram is down)
+          if (data.responseMessage) {
+            responseMessage = data.responseMessage;
+          } else if (data.delivered === false) {
+            responseMessage = 'Your message has been saved. We will respond to you soon.';
+          }
+        } else {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to send message.');
+        }
+      } catch (err) {
+        console.error('Contact submission error:', err);
+        throw err;
+      }
+
+      setStatusText(responseMessage);
       setSubmitted(true);
       setTimeout(() => {
         setSubmitted(false);

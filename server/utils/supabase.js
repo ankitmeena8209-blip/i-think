@@ -8,14 +8,17 @@ function getEnvValue(keys) {
   return '';
 }
 
-const supabaseUrl = getEnvValue(['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL']);
-const supabaseAnonKey = getEnvValue(['SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY']);
-
 let supabaseClient = null;
 
 export function getSupabaseClient() {
-  if (!supabaseClient && supabaseUrl && supabaseAnonKey) {
-    supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+  if (!supabaseClient) {
+    // Read env vars lazily so they are available even if this module was
+    // imported before .env / .env.local were fully loaded.
+    const url = getEnvValue(['SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL']);
+    const key = getEnvValue(['SUPABASE_ANON_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY']);
+    if (url && key) {
+      supabaseClient = createClient(url, key);
+    }
   }
   return supabaseClient;
 }

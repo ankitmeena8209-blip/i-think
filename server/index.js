@@ -1,4 +1,6 @@
-import 'dotenv/config';
+// Load environment variables FIRST, before any module that reads them.
+// env.js loads both .env and .env.local (where VITE_ Supabase credentials live).
+import './env.js';
 
 import express from 'express';
 import cookieParser from 'cookie-parser';

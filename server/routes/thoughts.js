@@ -2,6 +2,7 @@ import express from 'express';
 import { getSessionUser } from './auth.js';
 import { sanitizeText, containsProfanity, checkRateLimit } from '../utils/moderation.js';
 import { getSupabaseClient } from '../utils/supabase.js';
+import { getClientIp } from '../utils/ip.js';
 
 const router = express.Router();
 const supabase = getSupabaseClient();
@@ -57,7 +58,7 @@ router.post('/', async (req, res) => {
     return res.status(401).json({ error: 'You must create an identity to publish thoughts.' });
   }
 
-  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+  const clientIp = getClientIp(req);
 
   // Rate limiting (max 5 thoughts per 60s per user)
   const rateLimit = checkRateLimit(`thought_${user.id}_${clientIp}`, 5, 60000);

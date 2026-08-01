@@ -40,31 +40,55 @@ export default function App() {
     const init = async () => {
       try {
         try {
-          const res = await fetch('/api/auth/me');
-          const data = await res.json();
-          if (data.authenticated && data.user) {
-            setUser(data.user);
-            if (data.user.isAdmin) {
+          const authRes = await fetch('/api/auth/me');
+          const authData = await authRes.json();
+
+          if (authData.authenticated && authData.user) {
+            setUser(authData.user);
+            if (authData.user.isAdmin) {
               setActivePage('admin');
             } else {
-              saveUserSession(data.user);
+              saveUserSession(authData.user);
               setActivePage('home');
             }
           } else {
-            const restoredUser = getUserSession();
-            if (restoredUser) {
-              setUser(restoredUser);
-              if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
-                setIsAdminLoginOpen(true);
-              } else {
-                setActivePage('home');
-              }
-            } else {
+            const validationRes = await fetch('/api/identity/validate', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({})
+            });
+            const validationData = await validationRes.json();
+
+            if (validationData.valid === false) {
+              // The user was deleted by an admin — clear the stale local session
+              // and require them to create a brand-new identity.
+              clearUserSession();
               setUser(null);
               if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
                 setIsAdminLoginOpen(true);
               }
               setActivePage('identity');
+            } else if (validationData.user) {
+              setUser(validationData.user);
+              saveUserSession(validationData.user);
+              setActivePage('home');
+            } else {
+              const restoredUser = getUserSession();
+              if (restoredUser) {
+                setUser(restoredUser);
+                if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+                  setIsAdminLoginOpen(true);
+                } else {
+                  setActivePage('home');
+                }
+              } else {
+                setUser(null);
+                if (window.location.hash === '#admin' || window.location.pathname.startsWith('/admin')) {
+                  setIsAdminLoginOpen(true);
+                }
+                setActivePage('identity');
+              }
             }
           }
         } catch (_) {
@@ -125,7 +149,7 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (_) {}
+    } catch (_) { }
 
     setUser(null);
     clearUserSession();

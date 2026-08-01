@@ -2,8 +2,11 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { checkRateLimit } from '../utils/moderation.js';
+import { getSupabaseClient } from '../utils/supabase.js';
+import { detectTableColumns } from '../utils/supabaseSchema.js';
 
 const router = express.Router();
+const supabase = getSupabaseClient();
 const SESSION_COOKIE_NAME = 'ithink_session';
 const SESSION_SECRET = process.env.SESSION_SECRET || process.env.ADMIN_SESSION_SECRET || 'i-think-dev-secret';
 
@@ -92,18 +95,81 @@ export function clearSessionCookie(res) {
   res.clearCookie(SESSION_COOKIE_NAME, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/' });
 }
 
-// Helper to get active session user
+// Look up a non-deleted user by ID in Supabase (falls back to session payload if Supabase unavailable)
+export async function findActiveUserById(userId, fallbackUsername) {
+  if (!userId) return null;
+
+  // Admin sessions are stateless and always valid
+  if (String(userId).startsWith('admin_')) {
+    return { id: userId, username: fallbackUsername || '', isAdmin: true };
+  }
+
+  if (supabase) {
+    try {
+      // Detect whether the deployed DB has the `deleted_at` column.
+      // Older deployments don't — in that case we treat any existing user row as valid
+      // (soft-delete simply isn't supported there yet).
+      const userColumns = await detectTableColumns('users', [
+        'id', 'username', 'word1', 'word2', 'is_admin', 'deleted_at'
+      ]);
+      const hasDeletedAt = userColumns.columns.has('deleted_at');
+
+      const projection = hasDeletedAt
+        ? 'id, username, word1, word2, is_admin, deleted_at'
+        : 'id, username, word1, word2, is_admin';
+
+      let query = supabase
+        .from('users')
+        .select(projection)
+        .eq('id', userId);
+
+      if (hasDeletedAt) {
+        query = query.eq('deleted_at', null);
+      }
+
+      const { data, error } = await query.maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) return null; // User was deleted or no longer exists
+
+      return {
+        id: data.id,
+        username: data.username,
+        isAdmin: Boolean(data.is_admin),
+        word1: data.word1,
+        word2: data.word2
+      };
+    } catch (err) {
+      // If the query itself is broken due to schema mismatch, do NOT silently
+      // re-trust the stale session — that would let deleted users keep access.
+      // Instead log out by returning null, unless Supabase itself is unreachable.
+      if (err?.code === '42703' || /column .* does not exist/i.test(err?.message || '')) {
+        console.warn('[auth] Schema mismatch while validating user — logging out:', err.message);
+        return null;
+      }
+      console.warn('[auth] Error validating user in Supabase:', err.message);
+      // Fall back to session payload so the app remains usable if Supabase is temporarily down
+      return { id: userId, username: fallbackUsername || '', isAdmin: false };
+    }
+  }
+
+  // No Supabase configured — trust the session payload
+  return { id: userId, username: fallbackUsername || '', isAdmin: false };
+}
+
+// Helper to get active session user (validates against DB so deleted users lose access immediately)
 export async function getSessionUser(req) {
   const token = req.cookies?.[SESSION_COOKIE_NAME];
   const payload = decodeSessionPayload(token);
 
   if (!payload?.id || !payload?.username) return null;
 
-  return {
-    id: payload.id,
-    username: payload.username,
-    isAdmin: Boolean(payload.isAdmin)
-  };
+  // Verify with database that the user still exists and is not deleted
+  const activeUser = await findActiveUserById(payload.id, payload.username);
+  if (!activeUser) return null;
+
+  return activeUser;
 }
 
 // GET /api/auth/me
@@ -112,7 +178,7 @@ router.get('/me', async (req, res) => {
   if (!user) {
     return res.json({ authenticated: false });
   }
-  return res.json({ authenticated: true, user });
+  return res.json({ authenticated: true, user: { ...user, isAdmin: Boolean(user.isAdmin) } });
 });
 
 // POST /api/auth/admin-login

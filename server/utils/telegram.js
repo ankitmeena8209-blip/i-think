@@ -24,10 +24,10 @@ export async function sendTelegramContactNotification({ username, userId, rawDat
   console.log('\n--- [TELEGRAM BOT API AUDIT START] ---');
 
   // 1. Resolve Token
-  const rawToken = process.env.TELEGRAM_BOT_TOKEN || 
-                   process.env.TELEGRAM_TOKEN || 
-                   process.env.BOT_TOKEN || 
-                   HARDCODED_BOT_TOKEN;
+  const rawToken = process.env.TELEGRAM_BOT_TOKEN ||
+    process.env.TELEGRAM_TOKEN ||
+    process.env.BOT_TOKEN ||
+    HARDCODED_BOT_TOKEN;
 
   let cleanToken = rawToken.trim();
   if (cleanToken.toLowerCase().startsWith('bot')) {
@@ -35,9 +35,9 @@ export async function sendTelegramContactNotification({ username, userId, rawDat
   }
 
   // 2. Resolve Chat ID
-  let rawChatId = process.env.TELEGRAM_CHAT_ID || 
-                  process.env.TELEGRAM_CHATID || 
-                  process.env.CHAT_ID;
+  let rawChatId = process.env.TELEGRAM_CHAT_ID ||
+    process.env.TELEGRAM_CHATID ||
+    process.env.CHAT_ID;
 
   // Auto-discover Chat ID from Telegram getUpdates if not explicitly set in env
   if (!rawChatId) {
@@ -80,6 +80,8 @@ export async function sendTelegramContactNotification({ username, userId, rawDat
   const identityName = username || 'Anonymous Stranger';
   const displayUserId = userId ? String(userId) : 'N/A (Unauthenticated)';
   const formattedTime = formatTelegramTime(rawDate ? new Date(rawDate) : new Date());
+  const displayIp = ipAddress || 'Unknown';
+  const displayBrowser = userAgent || 'Unknown Browser';
 
   const telegramText = `📩 New Contact Message
 
@@ -91,6 +93,12 @@ ${displayUserId}
 
 Time:
 ${formattedTime}
+
+IP Address:
+${displayIp}
+
+Browser:
+${displayBrowser}
 
 Message:
 ${message}`;

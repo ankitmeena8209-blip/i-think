@@ -1,11 +1,12 @@
 import express from 'express';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateWord, capitalizeWord } from '../utils/moderation.js';
 import { getSupabaseClient } from '../utils/supabase.js';
-import { encodeSessionPayload } from './auth.js';
+import { detectTableColumns } from '../utils/supabaseSchema.js';
+import { setSessionCookie, clearSessionCookie } from './auth.js';
+import { getClientIp } from '../utils/ip.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,9 +21,27 @@ const natureWords = JSON.parse(
 const router = express.Router();
 const supabase = getSupabaseClient();
 
+let userSchemaChecked = false;
+let hasUsersDeletedAt = false;
+
+async function initUserSchema() {
+  if (userSchemaChecked) return hasUsersDeletedAt;
+  const userColumns = await detectTableColumns('users', [
+    'id', 'username', 'deleted_at'
+  ]);
+  hasUsersDeletedAt = userColumns.columns.has('deleted_at');
+  userSchemaChecked = true;
+  return hasUsersDeletedAt;
+}
+
 async function isUsernameTaken(username) {
   if (!supabase) return false;
-  const { data, error } = await supabase.from('users').select('id').eq('username', username).limit(1);
+
+  // On older databases without a `deleted_at` column, hard deletions simply remove
+  // the row, so any existing row with this username is still "taken".
+  const hasDeletedAt = await initUserSchema();
+  const projection = hasDeletedAt ? 'id, deleted_at' : 'id';
+  const { data, error } = await supabase.from('users').select(projection).eq('username', username).limit(1);
   if (error) throw error;
   return Boolean(data?.length);
 }
@@ -121,6 +140,100 @@ router.post('/generate', async (req, res) => {
   return res.json({ success: true, ...found });
 });
 
+async function generateAvailableIdentity() {
+  let attempts = 0;
+  let found = null;
+
+  while (attempts < 50) {
+    attempts++;
+    const w1 = capitalizeWord(descriptiveWords[Math.floor(Math.random() * descriptiveWords.length)]);
+    const w2 = capitalizeWord(natureWords[Math.floor(Math.random() * natureWords.length)]);
+    const username = `${w1}${w2}`;
+
+    if (!(await isUsernameTaken(username))) {
+      found = { word1: w1, word2: w2, username };
+      break;
+    }
+  }
+
+  if (!found) {
+    throw new Error('Failed to generate available identity. Please try again.');
+  }
+
+  return found;
+}
+
+// POST /api/identity/validate
+router.post('/validate', async (req, res) => {
+  const cookieValue = req.cookies?.ithink_user;
+  if (!cookieValue) {
+    return res.json({ valid: true, refreshed: false, user: null });
+  }
+
+  let parsedUser = null;
+  try {
+    // cookie-parser already URL-decodes cookie values, so parse JSON directly
+    parsedUser = JSON.parse(cookieValue);
+  } catch (err) {
+    return res.json({ valid: true, refreshed: false, user: null });
+  }
+
+  if (!parsedUser?.id) {
+    return res.json({ valid: true, refreshed: false, user: null });
+  }
+
+  if (!supabase) {
+    return res.json({ valid: true, refreshed: false, user: parsedUser });
+  }
+
+  try {
+    const userColumns = await detectTableColumns('users', [
+      'id', 'username', 'word1', 'word2', 'deleted_at'
+    ]);
+    const hasDeletedAt = userColumns.columns.has('deleted_at');
+
+    const projection = hasDeletedAt
+      ? 'id, username, word1, word2, deleted_at'
+      : 'id, username, word1, word2';
+
+    const { data, error } = await supabase
+      .from('users')
+      .select(projection)
+      .eq('id', parsedUser.id)
+      .maybeSingle();
+
+    // User no longer exists OR was soft-deleted — clear the stale session and ask for a new identity.
+    // We do NOT auto-create a new account here so the visitor can consciously choose a new identity.
+    if (error || !data || (hasDeletedAt && data.deleted_at)) {
+      clearSessionCookie(res);
+      res.clearCookie('ithink_user', { path: '/' });
+      return res.json({ valid: false, refreshed: false, user: null });
+    }
+
+    return res.json({
+      valid: true,
+      refreshed: false,
+      user: {
+        id: data.id,
+        username: data.username,
+        word1: data.word1,
+        word2: data.word2
+      }
+    });
+  } catch (err) {
+    // If the query is broken due to a schema mismatch, do NOT silently re-trust a
+    // potentially-deleted session. Log the error and log the user out.
+    if (err?.code === '42703' || /column .* does not exist/i.test(err?.message || '')) {
+      console.warn('[identity] Schema mismatch during validate — clearing session:', err.message);
+      clearSessionCookie(res);
+      res.clearCookie('ithink_user', { path: '/' });
+      return res.json({ valid: false, refreshed: false, user: null });
+    }
+    console.error('Error validating anonymous identity:', err);
+    return res.status(500).json({ error: 'Failed to validate anonymous identity.' });
+  }
+});
+
 // POST /api/identity/create
 router.post('/create', async (req, res) => {
   const { word1, word2 } = req.body || {};
@@ -143,7 +256,7 @@ router.post('/create', async (req, res) => {
     });
   }
 
-  const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+  const clientIp = getClientIp(req);
 
   try {
     if (!supabase) {
@@ -166,20 +279,12 @@ router.post('/create', async (req, res) => {
       throw error;
     }
 
-    const sessionToken = encodeSessionPayload({
+    setSessionCookie(res, {
       id: createdUser?.id,
       username: createdUser?.username || username,
       word1: createdUser?.word1 || w1,
       word2: createdUser?.word2 || w2,
       isAdmin: false
-    });
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
-
-    res.cookie('ithink_session', sessionToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      path: '/'
     });
 
     return res.json({

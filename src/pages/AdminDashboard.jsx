@@ -184,7 +184,7 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
   // --- ACTIONS ---
 
   const handleDeleteUser = async (userId, username) => {
-    if (!window.confirm(`Are you sure you want to permanently delete identity "${username}" and all associated thoughts?`)) return;
+    if (!window.confirm(`Delete identity "${username}" and all associated thoughts? Their identity will be permanently reserved and cannot be reused.`)) return;
 
     try {
       const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
@@ -410,11 +410,10 @@ export default function AdminDashboard({ user, onNavigate, onLogout, onOpenAdmin
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`font-label-md py-2.5 px-5 rounded-[14px] transition-all flex items-center gap-2 cursor-pointer ${
-              activeTab === tab.id
+            className={`font-label-md py-2.5 px-5 rounded-[14px] transition-all flex items-center gap-2 cursor-pointer ${activeTab === tab.id
                 ? 'bg-primary dark:bg-white text-on-primary dark:text-black font-medium shadow-sm'
                 : 'bg-surface-container-lowest dark:bg-[#1A1A1A] text-secondary dark:text-[#A1A1A1] border border-outline-variant dark:border-[#333333] hover:text-primary dark:hover:text-white'
-            }`}
+              }`}
           >
             <span className="material-symbols-outlined text-[18px]">{tab.icon}</span>
             {tab.label}
